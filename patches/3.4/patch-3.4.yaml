@@ -62,6 +62,8 @@ patches:
   # prism is the default compiler only since ruby 3.4
   - feature: prism_compile_memfs
     file: prism_compile_memfs.patch
+  - feature: ruby_c_fcntl_shim
+    file: ruby_c_fcntl_shim.patch
   - feature: ruby_c_memfs_path_msys
     file: ruby_c_memfs_path_msys.patch
   - feature: win32_file_c_tebako_load_ok_msys

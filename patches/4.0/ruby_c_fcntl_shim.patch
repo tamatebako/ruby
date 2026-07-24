@@ -1,0 +1,63 @@
+# ruby_c_fcntl_shim.patch
+#
+# Target:  ruby.c (pass2 (linux gnu/musl, macos))
+# Source:  new for the modern-API io routing (02b follow-up; the msys ruby.c
+#          memfs-path patch carries the same shim)
+#
+# Route fcntl on memfs file descriptors through the tebako_fd_is_embedded
+# dispatch (tfs_fcntl): open_load_file's disable_nonblock hits
+# fcntl(F_SETFL) on the embedded fd of the packaged entry script, which the
+# host fcntl rejects (EBADF). Embedded fds emulate the flag state
+# (FD_CLOEXEC stored, status flags report O_RDONLY; F_SETFL/F_SETFD are
+# no-ops on the read-only memfs); host fds pass through unchanged.
+# X-Redesign: modern-api
+diff --git a/ruby.c b/ruby.c
+index 0d60ece..ce61e2b 100644
+--- a/ruby.c
++++ b/ruby.c
+@@ -66,6 +66,45 @@
+ STATIC_ASSERT(Qnil_1bit_from_Qfalse, singlebit_only_p(Qnil^Qfalse));
+ STATIC_ASSERT(Qundef_1bit_from_Qnil, singlebit_only_p(Qundef^Qnil));
+ 
++/* -- Start of tebako patch -- */
++#include <tebako/fs/c_api.h>     /* modern libtfs C API (tebako_fs_*) */
++
++/* fcntl on a memfs fd: the memfs is read-only, so the flag state is
++   emulated (FD_CLOEXEC stored, status flags report O_RDONLY); calls on host
++   fds pass through to the real fcntl */
++static int
++tfs_fcntl(int fd, int cmd, ...)
++{
++    static int cloexec_flags;
++    va_list ap;
++    int arg = 0;
++
++    va_start(ap, cmd);
++    arg = va_arg(ap, int);
++    va_end(ap);
++
++    if (!tebako_fd_is_embedded(fd)) {
++        return fcntl(fd, cmd, arg);
++    }
++    switch (cmd) {
++    case F_GETFD:
++        return cloexec_flags;
++    case F_SETFD:
++        cloexec_flags = arg;
++        return 0;
++    case F_GETFL:
++        return O_RDONLY;
++    case F_SETFL:
++        return 0;
++    default:
++        errno = EINVAL;
++        return -1;
++    }
++}
++
++#define fcntl(...) tfs_fcntl(__VA_ARGS__)
++/* -- End of tebako patch -- */
++
+ #ifndef MAXPATHLEN
+ # define MAXPATHLEN 1024
+ #endif
