@@ -36,6 +36,9 @@ jobs:
       - uses: ruby/setup-ruby@v1
         with:
           ruby-version: "3.2"
+          bundler-cache: true
+      - name: validate manifests against schema
+        run: bundle exec tools/validate_manifests
       - name: apply patches
         run: tools/apply "${{ matrix.version }}" "$PWD/build"
       - name: package

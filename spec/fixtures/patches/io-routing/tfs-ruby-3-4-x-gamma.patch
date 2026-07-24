@@ -1,4 +1,0 @@
-# selection fixture (content not applied)
-diff --git a/lib/gamma.rb b/lib/gamma.rb
---- a/lib/gamma.rb
-+++ b/lib/gamma.rb

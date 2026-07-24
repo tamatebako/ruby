@@ -1,0 +1,24 @@
+# file_c_tebako_includes.patch
+#
+# Target:  file.c (pass2 (all platforms))
+# Source:  tebako gem lib/tebako/packager/pass2_patch.rb Pass2Patch#patch_map_base
+#
+# Inject the tebako memfs io headers into file.c.
+# X-Redesign: modern-api
+diff --git a/file.c b/file.c
+index 373788b..4da03d0 100644
+--- a/file.c
++++ b/file.c
+@@ -93,6 +93,12 @@ int flock(int, int);
+ # define lstat stat
+ #endif
+ 
++/* -- Start of tebako patch -- */
++#include <tebako/tebako-config.h>
++#include <tebako/tebako-defines.h>
++#include <tebako/tebako-io.h>
++/* -- End of tebako patch -- */
++
+ /* define system APIs */
+ #ifdef _WIN32
+ # include "win32/file.h"

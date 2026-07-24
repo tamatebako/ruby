@@ -1,0 +1,10 @@
+# Broken on purpose: feature "partial" has versioned entries for patch
+# levels 4 and 6 only, so resolving 8.8.5 must raise (never silent).
+version: "8.8"
+patches:
+  - feature: partial
+    file: partial_4.patch
+    version: "4"
+  - feature: partial
+    file: partial_6.patch
+    version: "6"

@@ -1,0 +1,36 @@
+version: "3.3"
+patches:
+  - feature: alpha
+    file: alpha.patch
+  - feature: alpha
+    file: alpha_7.patch
+    version: "7"
+  - feature: configure_extstatic_darwin
+    file: configure_extstatic_darwin.patch
+  - feature: dir_c_memfs
+    file: dir_c_memfs.patch
+  - feature: gnu
+    file: gnu_3.patch
+    version: "3"
+  - feature: gnu
+    file: gnu_3.patch
+    version: "4"
+  - feature: gnu
+    file: gnu_3.patch
+    version: "5"
+  - feature: gnu
+    file: gnu_3.patch
+    version: "6"
+  - feature: gnu
+    file: gnu_7.patch
+    version: "7"
+  - feature: gnumakefile_in_pass1_msys
+    file: gnumakefile_in_pass1_msys.patch
+  - feature: gnumakefile_in_pass2_msys
+    file: gnumakefile_in_pass2_msys.patch
+  - feature: thread_pthread_main_stack_musl
+    file: thread_pthread_main_stack_musl.patch
+  - feature: dir_c_memfs_msys
+    file: dir_c_memfs_msys.patch
+  - feature: gamma
+    file: gamma.patch

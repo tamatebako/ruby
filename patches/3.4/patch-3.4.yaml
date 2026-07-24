@@ -1,0 +1,72 @@
+# ruby 3.4 patch manifest (canonical tfs-ruby layout).
+# Entries apply in listed order. Schema: schema/patches.schema.yml.
+version: "3.4"
+patches:
+  - feature: common_mk_exts_mk_dep
+    file: common_mk_exts_mk_dep.patch
+  - feature: common_mk_static_ruby_link_msys
+    file: common_mk_static_ruby_link_msys.patch
+  # config.status is generated: defer until after ./configure (darwin)
+  - feature: config_status_mainlibs_darwin
+    file: config_status_mainlibs_darwin.patch
+  - feature: configure_extstatic_bundle_loader_darwin
+    file: configure_extstatic_bundle_loader_darwin.patch
+  - feature: ext_setup_nodynamic
+    file: ../3.3/ext_setup_nodynamic.patch
+  - feature: gnumakefile_in_pass1_msys
+    file: ../3.3/gnumakefile_in_pass1_msys_7.patch
+  - feature: gnumakefile_in_pass2_msys
+    file: ../3.3/gnumakefile_in_pass2_msys_7.patch
+  - feature: makefile_in_static_link_mlibs
+    file: makefile_in_static_link_mlibs.patch
+  - feature: makefile_in_static_ruby_link_msys
+    file: makefile_in_static_ruby_link_msys.patch
+  - feature: onigmo_h_onig_extern_msys
+    file: ../3.3/onigmo_h_onig_extern_msys_7.patch
+  - feature: openssl_extconf_ruby_export_msys
+    file: openssl_extconf_ruby_export_msys.patch
+  - feature: rubygems_openssl_require
+    file: ../3.1/rubygems_openssl_require.patch
+  - feature: rubygems_path_support
+    file: ../3.3/rubygems_path_support.patch
+  - feature: rubygems_path_support_msys
+    file: ../3.3/rubygems_path_support_msys.patch
+  - feature: thread_pthread_main_stack_musl
+    file: thread_pthread_main_stack_musl.patch
+  - feature: win32_clock_rename_msys
+    file: win32_clock_rename_msys.patch
+  - feature: winmain_c_wwinmain_msys
+    file: ../3.2/winmain_c_wwinmain_msys_7.patch
+  - feature: dir_c_memfs
+    file: dir_c_memfs.patch
+  - feature: dir_c_memfs_msys
+    file: dir_c_memfs_msys.patch
+  - feature: dln_c_dlmap_msys
+    file: dln_c_dlmap_msys.patch
+  - feature: dln_c_tebako_includes
+    file: dln_c_tebako_includes.patch
+  - feature: file_c_tebako_includes
+    file: file_c_tebako_includes.patch
+  - feature: gem_prelude_tebako_runtime
+    file: ../3.3/gem_prelude_tebako_runtime.patch
+  - feature: io_c_shims_msys
+    file: io_c_shims_msys.patch
+  - feature: io_c_tebako_includes
+    file: io_c_tebako_includes.patch
+  - feature: main_c_tebako_main
+    file: main_c_tebako_main.patch
+  - feature: mkconfig_memfs_prefix
+    file: mkconfig_memfs_prefix.patch
+  - feature: mkconfig_memfs_prefix_msys
+    file: mkconfig_memfs_prefix_msys.patch
+  # prism is the default compiler only since ruby 3.4
+  - feature: prism_compile_memfs
+    file: prism_compile_memfs.patch
+  - feature: ruby_c_memfs_path_msys
+    file: ruby_c_memfs_path_msys.patch
+  - feature: util_c_tebako_includes
+    file: util_c_tebako_includes.patch
+  - feature: win32_file_c_tebako_load_ok_msys
+    file: win32_file_c_tebako_load_ok_msys.patch
+  - feature: win32_getcwd_shim_msys
+    file: win32_getcwd_shim_msys.patch

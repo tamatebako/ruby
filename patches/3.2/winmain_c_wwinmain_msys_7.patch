@@ -1,0 +1,20 @@
+# winmain_c_wwinmain_msys_7.patch
+#
+# Target:  win32/winmain.c (pass1 (msys, ruby 3.2.7 / 3.3.7 / 3.4+))
+# Source:  tebako gem lib/tebako/packager/pass1_patch.rb Pass1MSysPatch::WIN32_WINMAIN_C_PATCH
+#
+# msys: build rubyw.exe with wWinMain (LPWSTR command line) instead of
+# WinMain.
+diff --git a/win32/winmain.c b/win32/winmain.c
+index a9f3809..ea563cc 100644
+--- a/win32/winmain.c
++++ b/win32/winmain.c
+@@ -4,7 +4,7 @@
+ extern int wmain(int, WCHAR**);
+ 
+ int WINAPI
+-WinMain(HINSTANCE current, HINSTANCE prev, LPSTR cmdline, int showcmd)
++wWinMain(HINSTANCE current, HINSTANCE prev, LPWSTR cmdline, int showcmd) /* tebako patched */
+ {
+     return wmain(0, NULL);
+ }

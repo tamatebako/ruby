@@ -1,0 +1,4 @@
+# selection fixture (content not applied)
+diff --git a/lib/exact_only.rb b/lib/exact_only.rb
+--- a/lib/exact_only.rb
++++ b/lib/exact_only.rb

@@ -1,0 +1,27 @@
+# dln_c_tebako_includes.patch
+#
+# Target:  dln.c (pass2 (linux gnu/musl, macos))
+# Source:  tebako gem lib/tebako/packager/pass2_patch.rb Pass2Patch#dln_c_patch
+#
+# Inject the tebako memfs io headers into dln.c (non-msys; dlxxx function
+# substitution is not used on Windows).
+# X-Redesign: modern-api
+diff --git a/dln.c b/dln.c
+index b4c2fb9..c1aefc5 100644
+--- a/dln.c
++++ b/dln.c
+@@ -76,7 +76,14 @@ void *xrealloc();
+ # include <unistd.h>
+ #endif
+ 
++/* -- Start of tebako patch -- */
++#include <tebako/tebako-config.h>
++#include <tebako/tebako-defines.h>
++#include <tebako/tebako-io.h>
++/* -- End of tebako patch -- */
++
+ #ifndef dln_loaderror
++
+ static void
+ dln_loaderror(const char *format, ...)
+ {

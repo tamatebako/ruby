@@ -1,0 +1,48 @@
+# bigdecimal_h_feature_macros.patch
+#
+# Target:  ext/bigdecimal/bigdecimal.h (pass1 (all platforms, ruby < 3.4))
+# Source:  tebako gem lib/tebako/packager/pass1_patch.rb Pass1Patch::EXT_BIGDECIMAL_BIGDECIMAL_H_PATCH
+#
+# Define HAVE_RB_SYM2STR / HAVE_RB_ARRAY_CONST_PTR / HAVE_RB_RATIONAL_NUM
+# / HAVE_RB_RATIONAL_DEN / HAVE_RB_COMPLEX_REAL / HAVE_RB_COMPLEX_IMAG for
+# the statically built bigdecimal extension (upstream detection gap; fixed
+# in ruby 3.4+).
+diff --git a/ext/bigdecimal/bigdecimal.h b/ext/bigdecimal/bigdecimal.h
+index bd1c467..bb2d685 100644
+--- a/ext/bigdecimal/bigdecimal.h
++++ b/ext/bigdecimal/bigdecimal.h
+@@ -11,6 +11,34 @@
+ 
+ #define RUBY_NO_OLD_COMPATIBILITY
+ #include "ruby/ruby.h"
++
++/* -- Start of tebako patch -- */
++#ifndef HAVE_RB_SYM2STR
++#define HAVE_RB_SYM2STR  1
++#endif
++
++#ifndef HAVE_RB_ARRAY_CONST_PTR
++#define HAVE_RB_ARRAY_CONST_PTR 1
++#endif
++
++#ifndef HAVE_RB_RATIONAL_NUM
++#define HAVE_RB_RATIONAL_NUM 1
++#endif
++
++#ifndef HAVE_RB_RATIONAL_DEN
++#define HAVE_RB_RATIONAL_DEN 1
++#endif
++
++#ifndef HAVE_RB_COMPLEX_REAL
++#define HAVE_RB_COMPLEX_REAL
++#endif
++
++#ifndef HAVE_RB_COMPLEX_IMAG
++#define HAVE_RB_COMPLEX_IMAG
++#endif
++/* -- End of tebako patch -- */
++
++
+ #include "missing.h"
+ 
+ #ifdef HAVE_FLOAT_H

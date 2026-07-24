@@ -1,0 +1,6 @@
+version: "3.4"
+patches:
+  - feature: alpha
+    file: ../3.3/alpha.patch
+  - feature: gamma
+    file: ../3.3/gamma.patch

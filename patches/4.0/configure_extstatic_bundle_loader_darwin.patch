@@ -1,0 +1,24 @@
+# configure_extstatic_bundle_loader_darwin.patch
+#
+# Target:  configure (pass1 (macos))
+# Source:  tebako gem lib/tebako/packager/pass1_patch.rb Pass1DarwinPatch::DARWIN_CONFIGURE_PATCH
+#
+# macos: when building exts as bundles, a mach-o bundle needs to know its
+# loader program (-bundle_loader '$(BUILTRUBY)'). Gems bundled with ruby
+# ignore --with-static-ext and build extensions as shared libraries, so
+# the bundle loader is required for them to link; upstream disables it
+# whenever EXTSTATIC is set. Force the EXTSTATIC branch to always set
+# EXTDLDFLAGS.
+diff --git a/configure b/configure
+index cdef7b4..7a3bda1 100755
+--- a/configure
++++ b/configure
+@@ -31176,7 +31176,7 @@ then :
+ 
+                             # Resolve symbols from libruby.dylib in $(LIBS) when --enable-shared
+ 
+-elif test "x$EXTSTATIC" = x
++elif true
+ then :
+ 
+                             # When building exts as bundles, a mach-o bundle needs to know its loader

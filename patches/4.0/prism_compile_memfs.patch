@@ -1,0 +1,47 @@
+# prism_compile_memfs.patch
+#
+# Target:  prism_compile.c (pass2 (all platforms, ruby 3.4+))
+# Source:  tebako gem lib/tebako/packager/patch_literals.rb PatchLiterals::PRISM_PATCHES
+#
+# Read source files through tebako_string_file_init when the path is
+# inside the memfs (falling back to pm_read_file otherwise) and inject the
+# tebako memfs io headers.
+# X-Redesign: modern-api
+diff --git a/prism_compile.c b/prism_compile.c
+index 4b55775..860dd87 100644
+--- a/prism_compile.c
++++ b/prism_compile.c
+@@ -1,4 +1,13 @@
+ #include "prism.h"
++
++/* -- Start of tebako patch -- */
++#include <tebako/tebako-config.h>
++#include <tebako/tebako-defines.h>
++#include <tebako/tebako-io.h>
++#include <tebako/tebako-prism.h>
++/* -- End of tebako patch -- */
++
++
+ #include "ruby/version.h"
+ 
+ /**
+@@ -11371,7 +11380,18 @@ pm_read_file(pm_string_t *string, const char *filepath)
+ VALUE
+ pm_load_file(pm_parse_result_t *result, VALUE filepath, bool load_error)
+ {
+-    pm_string_init_result_t init_result = pm_read_file(&result->input, RSTRING_PTR(filepath));
++    /* -- Start of tebako patch -- */
++    pm_string_init_result_t init_result;
++    if (within_tebako_memfs(RSTRING_PTR(filepath)))
++    {
++      init_result = tebako_string_file_init(&result->input, RSTRING_PTR(filepath));
++    }
++    else
++    {
++      init_result = pm_read_file(&result->input, RSTRING_PTR(filepath));
++    }
++    /* -- End of tebako patch -- */
++
+ 
+     if (init_result == PM_STRING_INIT_SUCCESS) {
+         pm_options_frozen_string_literal_init(&result->options);

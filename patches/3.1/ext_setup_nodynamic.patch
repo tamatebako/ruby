@@ -1,0 +1,17 @@
+# ext_setup_nodynamic.patch
+#
+# Target:  ext/Setup (pass1 (all platforms))
+# Source:  tebako gem lib/tebako/packager/pass1_patch.rb Pass1Patch::EXT_SETUP_PATCH
+#
+# Disable dynamic extensions: enable 'option nodynamic' so extensions are
+# built statically.
+diff --git a/ext/Setup b/ext/Setup
+index 0376e2f..edde8b3 100644
+--- a/ext/Setup
++++ b/ext/Setup
+@@ -1,4 +1,4 @@
+-#option nodynamic
++option nodynamic
+ 
+ #bigdecimal
+ #cgi/escape

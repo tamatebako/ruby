@@ -1,49 +1,40 @@
 # frozen_string_literal: true
 
 module Tfs
-  # Implements the canonical patch-filename rule:
-  #   tfs-ruby-<major>-<minor>-<seg>-<slug>.patch
-  # where <seg> is "x" (whole major.minor line) or a patchlevel (exact
-  # release only). A version's patch set is the line-wide patches of its
-  # line plus the exact patchlevel matches; an exact patch SUPERSEDES the
-  # same-slug line-wide patch for that version.
+  # Resolves the patch set for a ruby version from the per-line layout:
+  # patches/<line>/patch-<line>.yaml (base) overlaid by
+  # patches/<line>/patch-<line>.<patch>.yaml when present (more specific
+  # wins per feature). Whole-line entries apply to every patch level;
+  # an entry with version: "<patch>" applies only to that exact patch
+  # level and supersedes the feature's whole-line entry for it. A feature
+  # whose versioned entries do not cover the requested patch level is an
+  # explicit error, never silent.
+  #
+  # With no scenario arguments the full manifest set is returned (for
+  # checking each patch independently). With +platform:+ and/or +pass:+
+  # the set is narrowed to one coherent build scenario (slug suffix
+  # conventions: terminal _msys / _darwin / _musl, and _pass1 / _pass2).
   class PatchSelection
-    # One patch file, identified by its parsed filename.
+    # One resolved patch: manifest entry + absolute file path.
     class Patch
-      NAME_FORMAT = /\Atfs-ruby-(\d+)-(\d+)-(x|\d+)-(.+)\.patch\z/.freeze
-
-      def self.parse(path, category)
-        match = NAME_FORMAT.match(File.basename(path))
-        raise ArgumentError, "malformed patch filename: #{path}" if match.nil?
-
-        new(path: path, category: category, major: match[1], minor: match[2], segment: match[3], slug: match[4])
-      end
-
-      def initialize(path:, category:, major:, minor:, segment:, slug:)
+      def initialize(path:, feature:, version:)
         @path = path
-        @category = category
-        @major = major
-        @minor = minor
-        @segment = segment
-        @slug = slug
+        @feature = feature
+        @version = version
       end
 
-      attr_reader :path, :category, :major, :minor, :segment, :slug
+      attr_reader :path, :feature, :version
 
       def name
         File.basename(@path)
       end
 
-      def line
-        "#{major}.#{minor}"
-      end
-
       def line_wide?
-        segment == "x"
+        @version.nil?
       end
 
       def patchlevel
-        segment unless line_wide?
+        @version
       end
 
       # Target file inside the ruby source tree (from the patch header).
@@ -57,42 +48,26 @@ module Tfs
       end
     end
 
+    # Raised when a version's set cannot be resolved from the manifests.
+    class SelectionError < StandardError; end
+
     DEFAULT_ROOT = File.expand_path("../../../patches", __dir__).freeze
 
-    # Platform suffixes used by slug convention (-msys / -darwin / -musl).
-    # A slug without a platform suffix is platform-neutral, except when it
-    # shares its target file with a platform-suffixed patch: then it is the
-    # complementary variant (e.g. dir-c-memfs vs dir-c-memfs-msys).
-    PLATFORM_SUFFIXES = %w[msys darwin musl].freeze
+    PLATFORM_SUFFIXES = %w[_msys _darwin _musl].freeze
     PLATFORM_TAGS = {
       "linux" => nil, "linux-gnu" => nil,
       "darwin" => "darwin", "macos" => "darwin",
       "linux-musl" => "musl", "musl" => "musl",
       "msys" => "msys", "mingw" => "msys"
     }.freeze
-    PASS_FORMAT = /-pass([12])(?:-|\z)/.freeze
+    PASS_FORMAT = /_pass([12])(?:_|\z)/.freeze
 
     def initialize(patches_root = DEFAULT_ROOT)
-      @patches = Dir.glob(File.join(patches_root, "*", "*.patch")).sort.map do |path|
-        Patch.parse(path, File.basename(File.dirname(path)))
-      end.freeze
+      @patches_root = patches_root
     end
 
-    attr_reader :patches
-
-    # The ordered patch set for one version, e.g. for("3.3.7").
-    # Filename rule: the line-wide patches of the version's line plus its
-    # exact patchlevel matches, where an exact patch supersedes the
-    # same-slug line-wide patch. Ordered by category then slug.
-    #
-    # With no scenario arguments the full union is returned (every variant;
-    # suitable for checking each patch independently). With +platform:+
-    # and/or +pass:+ the set is narrowed to one coherent build scenario:
-    # platform-suffixed patches for other platforms are dropped, on msys the
-    # neutral variants of msys-patched files are dropped too, and -pass1/-pass2
-    # alternatives are reduced to the requested pass.
     def for(version_name, platform: nil, pass: nil)
-      candidates = union(version_name)
+      candidates = resolve(version_name)
       candidates = filter_platform(candidates, platform) unless platform.nil?
       candidates = filter_pass(candidates, pass) unless pass.nil?
       candidates
@@ -100,13 +75,43 @@ module Tfs
 
     private
 
-    def union(version_name)
+    def resolve(version_name)
       line, patchlevel = version_name.split(".").then { |parts| [parts[0..1].join("."), parts[2]] }
-      of_line = @patches.select { |patch| patch.line == line }
-      exact = of_line.select { |patch| patch.patchlevel == patchlevel }
-      superseded = exact.map(&:slug)
-      line_wide = of_line.select { |patch| patch.line_wide? && !superseded.include?(patch.slug) }
-      (line_wide + exact).sort_by { |patch| [patch.category, patch.slug] }
+      line_dir = File.join(@patches_root, line)
+      base_path = File.join(line_dir, "patch-#{line}.yaml")
+      unless File.file?(base_path)
+        raise SelectionError, "#{version_name}: no patch manifest #{base_path}"
+      end
+
+      merged = merge_base(PatchManifest.new(base_path).entries)
+      overlay_path = File.join(line_dir, "patch-#{version_name}.yaml")
+      merge_overlay!(merged, PatchManifest.new(overlay_path).entries) if File.file?(overlay_path)
+
+      merged.flat_map { |feature, entries| select_entries(feature, entries, patchlevel, version_name, line_dir) }
+    end
+
+    def merge_base(entries)
+      merged = {}
+      entries.each { |entry| (merged[entry.feature] ||= []) << entry }
+      merged
+    end
+
+    def merge_overlay!(merged, entries)
+      entries.each { |entry| merged[entry.feature] = [entry] }
+      merged
+    end
+
+    def select_entries(feature, entries, patchlevel, version_name, line_dir)
+      exact = entries.select { |entry| entry.exact_for?(patchlevel) }
+      chosen = exact.any? ? exact : entries.select(&:whole_line?)
+      if chosen.empty?
+        raise SelectionError,
+              "#{version_name}: feature #{feature} has no entry covering patch level #{patchlevel}"
+      end
+
+      chosen.map do |entry|
+        Patch.new(path: File.expand_path(entry.file, line_dir), feature: feature, version: entry.version)
+      end
     end
 
     def filter_platform(candidates, platform)
@@ -126,13 +131,13 @@ module Tfs
       raise ArgumentError, "pass must be 1 or 2" unless %w[1 2].include?(wanted)
 
       candidates.reject do |patch|
-        match = PASS_FORMAT.match(patch.slug)
+        match = PASS_FORMAT.match(patch.feature)
         !match.nil? && match[1] != wanted
       end
     end
 
     def platform_suffix(patch)
-      PLATFORM_SUFFIXES.find { |suffix| patch.slug.end_with?("-#{suffix}") }
+      PLATFORM_SUFFIXES.find { |suffix| patch.feature.end_with?(suffix) }&.delete_prefix("_")
     end
   end
 end

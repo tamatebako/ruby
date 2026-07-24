@@ -1,0 +1,19 @@
+# io_console_win32_vk_signature_msys.patch
+#
+# Target:  ext/io/console/win32_vk.inc (pass1 (msys))
+# Source:  tebako gem lib/tebako/packager/pass1_patch.rb Pass1MSysPatch::EXT_IO_CONSOLE_WIN32_VK_INC_PATCH
+#
+# msys: fix the console_win32_vk declaration signature.
+diff --git a/ext/io/console/win32_vk.inc b/ext/io/console/win32_vk.inc
+index cbec7be..98297f7 100644
+--- a/ext/io/console/win32_vk.inc
++++ b/ext/io/console/win32_vk.inc
+@@ -513,7 +513,7 @@
+ #line 1 "win32_vk.list"
+ 
+ struct vktable {short ofs; unsigned short vk;};
+-static const struct vktable *console_win32_vk(/*const char *, unsigned int*/);
++/* tebako patched */ static const struct vktable *console_win32_vk(const char *, size_t);
+ #line 5 "win32_vk.list"
+ struct vktable;
+ /* maximum key range = 245, duplicates = 0 */

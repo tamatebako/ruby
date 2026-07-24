@@ -6,6 +6,8 @@
 # In-library files never require each other.
 module Tfs
   autoload :Versions, "tfs/versions"
+  autoload :PatchManifest, "tfs/patch_manifest"
   autoload :PatchSelection, "tfs/patch_selection"
+  autoload :SchemaLint, "tfs/schema_lint"
   autoload :SourcePrep, "tfs/source_prep"
 end

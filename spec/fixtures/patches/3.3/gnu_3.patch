@@ -1,0 +1,4 @@
+# selection fixture (content not applied)
+diff --git a/lib/gnu.rb b/lib/gnu.rb
+--- a/lib/gnu.rb
++++ b/lib/gnu.rb

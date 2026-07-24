@@ -1,0 +1,25 @@
+# openssl_extconf_ruby_export_msys.patch
+#
+# Target:  ext/openssl/extconf.rb (pass1 (msys))
+# Source:  tebako gem lib/tebako/packager/pass1_patch.rb Pass1MSysPatch::OPENSSL_EXTCONF_RB_PATCH
+#
+# msys: RUBY_EXPORT=1 shall be set for static builds but is missing in the
+# openssl extension; push -DRUBY_EXPORT=1 into $defs.
+diff --git a/ext/openssl/extconf.rb b/ext/openssl/extconf.rb
+index 56f4a1c..4e4c7f6 100644
+--- a/ext/openssl/extconf.rb
++++ b/ext/openssl/extconf.rb
+@@ -210,8 +210,13 @@ have_func("EVP_MD_CTX_get_pkey_ctx(NULL)", evp_h)
+ have_func("EVP_PKEY_eq(NULL, NULL)", evp_h)
+ have_func("EVP_PKEY_dup(NULL)", evp_h)
+ 
++# Start of tebako patch
++$defs.push("-DRUBY_EXPORT=1")
++# End of tebako patch
++
+ Logging::message "=== Checking done. ===\n"
+ 
++
+ # Append flags from environment variables.
+ extcflags = ENV["RUBY_OPENSSL_EXTCFLAGS"]
+ append_cflags(extcflags.split) if extcflags

@@ -7,7 +7,7 @@ RSpec.describe Tfs::SourcePrep do
   let(:versions) { Tfs::Versions.new(File.join(SPEC_FIXTURES, "versions.yml")) }
 
   # Selection over the committed fixture patch set (contains the real tiny
-  # patch for the 9.9.9 fixture tree).
+  # patch for the 9.9.9 fixture tree via patches/9.9/patch-9.9.yaml).
   let(:selection) { Tfs::PatchSelection.new(File.join(SPEC_FIXTURES, "patches")) }
 
   def prep_with(cache_dir, patches_root)
@@ -23,10 +23,19 @@ RSpec.describe Tfs::SourcePrep do
     cache
   end
 
-  def write_patch(patches_root, name, text)
-    dir = File.join(patches_root, "build-config")
-    FileUtils.mkdir_p(dir)
-    File.write(File.join(dir, name), text)
+  # Builds a one-line manifest layout: <dir>/patches/9.9/patch-9.9.yaml
+  # listing the given patch file, written next to it.
+  def write_single_patch_layout(dir, patch_name, patch_text)
+    line_dir = File.join(dir, "patches", "9.9")
+    FileUtils.mkdir_p(line_dir)
+    File.write(File.join(line_dir, patch_name), patch_text)
+    File.write(File.join(line_dir, "patch-9.9.yaml"), <<~YAML)
+      version: "9.9"
+      patches:
+        - feature: #{File.basename(patch_name, ".patch")}
+          file: #{patch_name}
+    YAML
+    File.join(dir, "patches")
   end
 
   it "fetches from cache, verifies, extracts and applies the version's patch set" do
@@ -46,7 +55,7 @@ RSpec.describe Tfs::SourcePrep do
       prep = described_class.new(versions: versions, selection: selection, cache_dir: seeded_cache(dir))
       checked = prep.check("9.9.9", File.join(dir, "out"))
 
-      expect(checked).to eq(["tfs-ruby-9-9-x-tiny.patch"])
+      expect(checked).to eq(["tiny.patch"])
       pristine = File.join(dir, "out", "ruby-9.9.9", "hello.txt")
       expect(File.read(pristine)).to eq("line one\nline two\nline three\n")
     end
@@ -54,8 +63,7 @@ RSpec.describe Tfs::SourcePrep do
 
   it "defers a patch whose target file is not in the pristine tree" do
     Dir.mktmpdir do |dir|
-      patches = File.join(dir, "patches")
-      write_patch(patches, "tfs-ruby-9-9-x-deferred.patch", <<~PATCH)
+      patches = write_single_patch_layout(dir, "deferred.patch", <<~PATCH)
         diff --git a/nope.txt b/nope.txt
         --- a/nope.txt
         +++ b/nope.txt
@@ -67,14 +75,13 @@ RSpec.describe Tfs::SourcePrep do
 
       expect do
         prep.prepare("9.9.9", File.join(dir, "out"), platform: "linux-gnu", pass: 2)
-      end.to output(/DEFER 9\.9\.9 tfs-ruby-9-9-x-deferred\.patch/).to_stderr
+      end.to output(/DEFER 9\.9\.9 deferred\.patch/).to_stderr
     end
   end
 
   it "fails loudly naming version and patch when a patch does not apply" do
     Dir.mktmpdir do |dir|
-      patches = File.join(dir, "patches")
-      write_patch(patches, "tfs-ruby-9-9-x-bogus.patch", <<~PATCH)
+      patches = write_single_patch_layout(dir, "bogus.patch", <<~PATCH)
         diff --git a/hello.txt b/hello.txt
         --- a/hello.txt
         +++ b/hello.txt
@@ -86,7 +93,7 @@ RSpec.describe Tfs::SourcePrep do
 
       expect do
         prep.prepare("9.9.9", File.join(dir, "out"), platform: "linux-gnu", pass: 2)
-      end.to raise_error(Tfs::SourcePrep::ApplyError, /FAIL 9\.9\.9 tfs-ruby-9-9-x-bogus\.patch/)
+      end.to raise_error(Tfs::SourcePrep::ApplyError, /FAIL 9\.9\.9 bogus\.patch/)
     end
   end
 

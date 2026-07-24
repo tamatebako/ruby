@@ -1,0 +1,23 @@
+# common_mk_static_ruby_link_msys.patch
+#
+# Target:  common.mk (pass1 + pass2 (msys))
+# Source:  tebako gem lib/tebako/packager/patch.rb COMMON_MK_STATIC_RUBY_LINK_PATCH
+#
+# msys: the static-ext ruby.exe link (common.mk STATIC_RUBY rule) puts the
+# vcpkg static OpenSSL ahead of the Windows system libs it references
+# (Cert* from crypt32, WspiapiGet* from ws2_32); GNU ld's single pass then
+# leaves them unresolved (tebako#345). Group-wrap the libs so resolution
+# is order-insensitive. Applied in pass1 and pass2.
+diff --git a/common.mk b/common.mk
+index cddc6dc..378e65a 100644
+--- a/common.mk
++++ b/common.mk
+@@ -387,7 +387,7 @@ $(LIBRUBY_EXTS):
+ 
+ $(STATIC_RUBY)$(EXEEXT): $(MAINOBJ) $(DLDOBJS) $(EXTOBJS) $(LIBRUBY_A)
+ 	$(Q)$(RM) $@
+-	$(PURIFY) $(CC) $(MAINOBJ) $(DLDOBJS) $(LIBRUBY_A) $(MAINLIBS) $(EXTLIBS) $(LIBS) $(OUTFLAG)$@ $(LDFLAGS) $(XLDFLAGS)
++	$(PURIFY) $(CC) $(MAINOBJ) $(DLDOBJS) $(LIBRUBY_A) -Wl,--start-group $(MAINLIBS) $(EXTLIBS) $(LIBS) -Wl,--end-group $(OUTFLAG)$@ # tebako patched $(LDFLAGS) $(XLDFLAGS)
+ 
+ ruby.imp: $(COMMONOBJS)
+ 	$(Q){ \

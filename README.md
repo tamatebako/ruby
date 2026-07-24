@@ -11,45 +11,70 @@ diff was hand-written.
 
 ## Layout
 
-- `patches/build-config/` — build/link rules and toolchain compatibility:
-  link rules (`template/Makefile.in`, `common.mk`, `cygwin/GNUmakefile.in`,
-  darwin `configure`), `config.status` MAINLIBS injection, `win32/winmain.c`,
-  `include/ruby/onigmo.h`, `ext/openssl/extconf.rb`,
-  `ext/io/console/win32_vk.inc`, `tool/rbinstall.rb` (dropped, see below),
-  `ext/Setup`, `ext/bigdecimal/bigdecimal.h`, `enc/jis/props.h`,
-  `thread_pthread.c` (musl), rubygems (`path_support.rb`, `openssl.rb`),
-  `win32/win32.c` clock renames.
-- `patches/io-routing/` — memfs `tebako_*` io shims (legacy API, flagged for
-  redesign): `main.c`, `io.c`, `dir.c`, `file.c`, `util.c`, `dln.c`,
-  `prism_compile.c`, `ruby.c`, `win32/file.c`, `win32/win32.c` getcwd,
-  `tool/mkconfig.rb` memfs prefix, `gem_prelude.rb` tebako-runtime loader.
-  Every io-routing patch carries an `# X-Redesign: modern-api` header note.
+Per-line folders with YAML manifests:
+
+- `patches/<major.minor>/` — one folder per supported ruby line
+  (`3.1`, `3.2`, `3.3`, `3.4`, `4.0`). A line's folder holds **only** that
+  line's own (diverged) patch files plus its manifest(s): the base
+  `patch-<line>.yaml` and, where a feature applies to one exact patch
+  release only, an overlay `patch-<line>.<patch>.yaml` (currently
+  `patch-3.2.7.yaml` and `patch-3.3.7.yaml` for the `ruby3x7`-gated
+  onigmo/winmain fixes).
+- **Home-line rule:** a patch body shared by several lines lives once, in
+  the oldest line it applies to (its *home line*); other lines' manifests
+  reference it by relative path (`../<home-line>/<file>.patch`) — never
+  duplicated. Looking at one line's folder you see only its own files and
+  the manifest listing which older-line patches it pulls in (limited
+  information exposure).
+- `schema/` — JSON Schemas: `versions.schema.yml` for `versions.yml`,
+  `patches.schema.yml` for every `patch-*.yaml` manifest. CI validates
+  all manifests against them before use (`tools/validate_manifests`).
 - `versions.yml` — every supported ruby version with its official tarball
   URL, sha256 (mirroring the gem's `RUBY_VERSIONS`), and major.minor line.
 
+Patches are grouped by feature family rather than by build phase; the
+`# X-Redesign: modern-api` header note still marks the io-routing family
+(memfs `tebako_*` shims, legacy API flagged for redesign): `main.c`,
+`io.c`, `dir.c`, `file.c`, `util.c`, `dln.c`, `prism_compile.c`, `ruby.c`,
+`win32/file.c`, `win32/win32.c` getcwd, `tool/mkconfig.rb`,
+`gem_prelude.rb`. Everything else (link rules, toolchain compatibility,
+rubygems) is build-config.
+
 ## Naming
 
-`tfs-ruby-<major>-<minor>-<seg>-<slug>.patch`
+Real patch files: `<feature>[_<patch_version>].patch` — snake_case
+throughout (features and file names). The `_<patch_version>` suffix marks
+content tied to specific patch version(s) of its home line (e.g.
+`gnumakefile_in_pass1_msys_4.patch` covers 3.2.4-3.2.6,
+`gnumakefile_in_pass1_msys_7.patch` covers 3.2.7); whole-line bodies carry
+no suffix.
 
-- `<seg> = x` — verified to apply to **every** supported release of the
-  `<major>.<minor>` line listed in `versions.yml`.
-- `<seg> = <patchlevel>` — the upstream text exists only at that exact patch
-  release (e.g. `tfs-ruby-3-2-7-onigmo-h-onig-extern-msys.patch`: the gem
-  gates `ONIG_EXTERN` to ruby 3.2.7 / 3.3.7 / 3.4+).
-- Slug suffixes encode the scenario: `-msys`, `-darwin`, `-musl` platform
-  variants; `-pass1` / `-pass2` where the same file is patched differently in
-  the toolchain build vs the final build (`cygwin/GNUmakefile.in`). Platform
-  markers are always the **terminal** slug element (e.g.
-  `dln-c-dlmap-msys`). No platform suffix means the patch is
-  platform-independent, or — when it shares its target file with a
-  platform-suffixed patch — the complementary variant for the other
-  platforms (e.g. `dir-c-memfs` vs `dir-c-memfs-msys`).
+Feature suffixes encode the build scenario: terminal `_msys` / `_darwin` /
+`_musl` platform markers, and `_pass1` / `_pass2` where
+`cygwin/GNUmakefile.in` differs between the toolchain and the final build.
+A feature without a platform marker is platform-independent, or — when it
+shares its target file with a platform-marked feature — the complementary
+variant for the other platforms (e.g. `dir_c_memfs` vs `dir_c_memfs_msys`).
 
-**Supersede rule:** a patchlevel-specific file
-(`tfs-ruby-M-m-p-<slug>.patch`) supersedes the line-wide file
-(`tfs-ruby-M-m-x-<slug>.patch`) for exactly that release. Consumers must
-apply the most specific name matching the target version. Within a line, a
-slug is emitted either line-wide or as per-release files — never both.
+## Manifests and resolution
+
+Manifest schema (`schema/patches.schema.yml`): `version: "<line>"` plus a
+`patches:` **array** of entries (ordered; entries apply in listed order).
+Each entry: `feature: <snake_case>`, `file: <path>` (local or
+`../<line>/...`), and optionally `version: "<patch>"`.
+
+Resolution for ruby **X.Y.Z** (`Tfs::PatchSelection`):
+
+1. Read `patches/X.Y/patch-X.Y.yaml`, then overlay
+   `patches/X.Y/patch-X.Y.Z.yaml` if present — the overlay wins per
+   feature (replaced features keep their base position; overlay-only
+   features append).
+2. Take whole-line entries plus entries with `version: "<Z>"`; a
+   versioned entry supersedes its feature's whole-line entry for that Z
+   only.
+3. A feature whose entries are all versioned and do not cover Z is an
+   explicit error (`SelectionError`), never silent. Exact-release-only
+   features therefore live in overlays, not in the base manifest.
 
 ## Verification
 
@@ -98,21 +123,24 @@ packaging host. Canonical patches carry the literal placeholder
 ## Tooling (`tools/`)
 
 Thin executables over the model classes in `tools/lib/tfs/`
-(`Tfs::Versions`, `Tfs::PatchSelection`, `Tfs::SourcePrep`; namespace parent
-`tools/lib/tfs.rb` wires children with `autoload`):
+(`Tfs::Versions`, `Tfs::PatchManifest`, `Tfs::PatchSelection`,
+`Tfs::SchemaLint`, `Tfs::SourcePrep`; namespace parent `tools/lib/tfs.rb`
+wires children with `autoload`):
 
 - `tools/versions` — prints the versions.yml version list as a GitHub
   Actions matrix document (used to generate CI lanes from the manifest).
+- `tools/validate_manifests` — validates versions.yml and every
+  `patch-*.yaml` against `schema/`; run in CI before the manifests are used.
 - `tools/lint <version>` — fetches the official tarball (sha256-verified,
   cached in `.cache/tarballs`, override with `TFS_CACHE_DIR`), extracts it,
-  and runs `git apply --check` for every patch selected by the filename
-  rule (the full union; each patch checked independently). Fails named:
+  and runs `git apply --check` for every patch resolved from the line's
+  manifest set (each patch checked independently). Fails named:
   `FAIL <version> <patch>`.
 - `tools/apply <version> [outdir] [--platform NAME] [--pass 1|2]` — emits
   `<outdir>/tfs-ruby-<version>-src`, the pristine tree with the version's
-  patch set applied for **one coherent build scenario**. The union set is
-  not co-applicable to a single tree (platform-variant pairs such as
-  `dir-c-memfs` / `dir-c-memfs-msys` target the same lines, and
+  patch set applied for **one coherent build scenario**. The full manifest
+  set is not co-applicable to a single tree (platform-variant pairs such as
+  `dir_c_memfs` / `dir_c_memfs_msys` target the same lines, and
   `cygwin/GNUmakefile.in` has alternative pass1/pass2 patches), so apply
   narrows the set: `--platform` (`linux-gnu`/`linux-musl`/`darwin`/`msys`,
   default: host) drops other platforms' patches and, on msys, the neutral

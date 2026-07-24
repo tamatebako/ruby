@@ -1,0 +1,41 @@
+# io_c_shims_msys.patch
+#
+# Target:  io.c (pass2 (msys))
+# Source:  tebako gem lib/tebako/packager/pass2msys_patch.rb Pass2MSysPatch#io_c_patch (IO_C_MSYS_BASE_PATCH, IO_C_MSYS_PATCH[_PRE_32])
+#
+# msys: inject the tebako io headers, route open through tebako_open, and
+# treat tebako memfs file descriptors as already-readable in rb_io_wait
+# (skip the cancelable wait).
+# X-Redesign: modern-api
+diff --git a/io.c b/io.c
+index 1bfd39d..54d88d9 100644
+--- a/io.c
++++ b/io.c
+@@ -174,10 +174,16 @@ off_t __syscall(quad_t number, ...);
+ #define IO_RBUF_CAPA_FOR(fptr) (NEED_READCONV(fptr) ? IO_CBUF_CAPA_MIN : IO_RBUF_CAPA_MIN)
+ #define IO_WBUF_CAPA_MIN  8192
+ 
++/* -- Start of tebako patch -- */
++#include <tebako/tebako-config.h>
++#include <tebako/tebako-defines.h>
++#include <tebako/tebako-io.h>
++/* -- End of tebako patch -- */
++
+ /* define system APIs */
+ #ifdef _WIN32
+ #undef open
+-#define open	rb_w32_uopen
++#define open(p, f, m) tebako_open(3, (p), (f), (m))
+ #undef rename
+ #define rename(f, t)	rb_w32_urename((f), (t))
+ #endif
+@@ -500,7 +506,8 @@ rb_cloexec_fcntl_dupfd(int fd, int minfd)
+ 
+ #if defined(_WIN32)
+ #define WAIT_FD_IN_WIN32(fptr) \
+-    (rb_w32_io_cancelable_p((fptr)->fd) ? Qnil : rb_io_wait(fptr->self, RB_INT2NUM(RUBY_IO_READABLE), Qnil))
++    ((is_tebako_file_descriptor((fptr)->fd) || rb_w32_io_cancelable_p((fptr)->fd)) ? \
++Qnil : rb_io_wait(fptr->self, RB_INT2NUM(RUBY_IO_READABLE), Qnil))
+ #else
+ #define WAIT_FD_IN_WIN32(fptr)
+ #endif

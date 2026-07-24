@@ -1,0 +1,26 @@
+# util_c_tebako_includes.patch
+#
+# Target:  util.c (pass2 (all platforms))
+# Source:  tebako gem lib/tebako/packager/pass2_patch.rb Pass2Patch#util_c_patch
+#
+# Inject the tebako memfs io headers into util.c (after the
+# !HAVE_GNU_QSORT_R block).
+# X-Redesign: modern-api
+diff --git a/util.c b/util.c
+index 3c08879..f98acc3 100644
+--- a/util.c
++++ b/util.c
+@@ -531,6 +531,13 @@ ruby_qsort(void* base, const size_t nel, const size_t size, cmpfunc_t *cmp, void
+ #endif
+ #endif /* !HAVE_GNU_QSORT_R */
+ 
++/* -- Start of tebako patch -- */
++#include <tebako/tebako-config.h>
++#include <tebako/tebako-defines.h>
++#include <tebako/tebako-io.h>
++/* -- End of tebako patch -- */
++
++
+ char *
+ ruby_strdup(const char *str)
+ {

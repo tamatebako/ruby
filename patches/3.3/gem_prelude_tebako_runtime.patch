@@ -1,0 +1,28 @@
+# gem_prelude_tebako_runtime.patch
+#
+# Target:  gem_prelude.rb (pass1a (all platforms))
+# Source:  tebako gem lib/tebako/packager/pass1a_patch.rb Pass1APatch::GEM_PRELUDE_RB_PATCH
+#
+# Require tebako-runtime at interpreter startup (hooked next to the
+# DidYouMean definition in gem_prelude); warn if it cannot be loaded.
+# X-Redesign: modern-api
+diff --git a/gem_prelude.rb b/gem_prelude.rb
+index bcd2560..f8dd263 100644
+--- a/gem_prelude.rb
++++ b/gem_prelude.rb
+@@ -20,6 +20,15 @@ rescue LoadError
+   warn "`did_you_mean' was not loaded."
+ end if defined?(DidYouMean)
+ 
++# -- Start of tebako patch --
++begin
++  require 'tebako-runtime'
++rescue LoadError
++  warn "'tebako-runtime' was not loaded."
++end
++# -- End of tebako patch --
++
++
+ begin
+   require 'syntax_suggest/core_ext'
+ rescue LoadError

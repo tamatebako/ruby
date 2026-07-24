@@ -1,0 +1,90 @@
+# ruby 3.2 patch manifest (canonical tfs-ruby layout).
+# Entries apply in listed order. Schema: schema/patches.schema.yml.
+version: "3.2"
+patches:
+  # detection fixed upstream in ruby 3.4; applies to 3.1-3.3 only
+  - feature: bigdecimal_h_feature_macros
+    file: bigdecimal_h_feature_macros.patch
+  - feature: common_mk_exts_mk_dep
+    file: common_mk_exts_mk_dep.patch
+  - feature: common_mk_static_ruby_link_msys
+    file: common_mk_static_ruby_link_msys.patch
+  - feature: configure_extstatic_bundle_loader_darwin
+    file: configure_extstatic_bundle_loader_darwin.patch
+  - feature: ext_setup_nodynamic
+    file: ../3.1/ext_setup_nodynamic.patch
+  # toolchain-build GNUmakefile.in; content diverges per patch release (complete partition of the line)
+  - feature: gnumakefile_in_pass1_msys
+    file: gnumakefile_in_pass1_msys_4.patch
+    version: "4"
+  - feature: gnumakefile_in_pass1_msys
+    file: gnumakefile_in_pass1_msys_4.patch
+    version: "5"
+  - feature: gnumakefile_in_pass1_msys
+    file: gnumakefile_in_pass1_msys_4.patch
+    version: "6"
+  - feature: gnumakefile_in_pass1_msys
+    file: gnumakefile_in_pass1_msys_7.patch
+    version: "7"
+  # final-build GNUmakefile.in; content diverges per patch release (complete partition of the line)
+  - feature: gnumakefile_in_pass2_msys
+    file: gnumakefile_in_pass2_msys_4.patch
+    version: "4"
+  - feature: gnumakefile_in_pass2_msys
+    file: gnumakefile_in_pass2_msys_4.patch
+    version: "5"
+  - feature: gnumakefile_in_pass2_msys
+    file: gnumakefile_in_pass2_msys_4.patch
+    version: "6"
+  - feature: gnumakefile_in_pass2_msys
+    file: gnumakefile_in_pass2_msys_7.patch
+    version: "7"
+  # signature fixed upstream since ruby 3.4; applies to 3.1-3.3 only
+  - feature: io_console_win32_vk_signature_msys
+    file: ../3.1/io_console_win32_vk_signature_msys.patch
+  - feature: makefile_in_static_link_mlibs
+    file: makefile_in_static_link_mlibs.patch
+  - feature: makefile_in_static_ruby_link_msys
+    file: makefile_in_static_ruby_link_msys.patch
+  - feature: openssl_extconf_ruby_export_msys
+    file: openssl_extconf_ruby_export_msys.patch
+  - feature: rubygems_openssl_require
+    file: ../3.1/rubygems_openssl_require.patch
+  - feature: rubygems_path_support
+    file: rubygems_path_support.patch
+  - feature: rubygems_path_support_msys
+    file: rubygems_path_support_msys.patch
+  - feature: thread_pthread_main_stack_musl
+    file: thread_pthread_main_stack_musl.patch
+  - feature: win32_clock_rename_msys
+    file: win32_clock_rename_msys.patch
+  - feature: dir_c_memfs
+    file: dir_c_memfs.patch
+  - feature: dir_c_memfs_msys
+    file: dir_c_memfs_msys.patch
+  - feature: dln_c_dlmap_msys
+    file: dln_c_dlmap_msys.patch
+  - feature: dln_c_tebako_includes
+    file: dln_c_tebako_includes.patch
+  - feature: file_c_tebako_includes
+    file: file_c_tebako_includes.patch
+  - feature: gem_prelude_tebako_runtime
+    file: gem_prelude_tebako_runtime.patch
+  - feature: io_c_shims_msys
+    file: io_c_shims_msys.patch
+  - feature: io_c_tebako_includes
+    file: io_c_tebako_includes.patch
+  - feature: main_c_tebako_main
+    file: main_c_tebako_main.patch
+  - feature: mkconfig_memfs_prefix
+    file: mkconfig_memfs_prefix.patch
+  - feature: mkconfig_memfs_prefix_msys
+    file: mkconfig_memfs_prefix_msys.patch
+  - feature: ruby_c_memfs_path_msys
+    file: ruby_c_memfs_path_msys.patch
+  - feature: util_c_tebako_includes
+    file: util_c_tebako_includes.patch
+  - feature: win32_file_c_tebako_load_ok_msys
+    file: win32_file_c_tebako_load_ok_msys.patch
+  - feature: win32_getcwd_shim_msys
+    file: win32_getcwd_shim_msys.patch

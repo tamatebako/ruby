@@ -1,0 +1,23 @@
+# rubygems_openssl_require.patch
+#
+# Target:  lib/rubygems/openssl.rb (pass1 (all platforms))
+# Source:  tebako gem lib/tebako/packager/rubygems_patch.rb RubygemsPatch::RUBYGEMS_OPENSSL_RB_PATCH
+#
+# 'autoload :OpenSSL, "openssl"' fails to deal with a default gem from a
+# statically linked extension; require openssl eagerly instead.
+diff --git a/lib/rubygems/openssl.rb b/lib/rubygems/openssl.rb
+index c44f619..2a4bb2a 100644
+--- a/lib/rubygems/openssl.rb
++++ b/lib/rubygems/openssl.rb
+@@ -1,7 +1,11 @@
+ # frozen_string_literal: true
+ 
++# Start of tebako patch
++require "openssl"
++# End of tebako patch
+ autoload :OpenSSL, "openssl"
+ 
++
+ module Gem
+   HAVE_OPENSSL = defined? OpenSSL::SSL # :nodoc:
+ end
