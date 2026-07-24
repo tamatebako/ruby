@@ -1,7 +1,7 @@
-# tfs-ruby-4-0-x-io-c-msys-shims.patch
+# tfs-ruby-3-2-x-io-c-shims-msys.patch
 #
 # Target:  io.c (pass2 (msys))
-# Applies: ruby 4.0.x (4.0.0 - 4.0.6)
+# Applies: ruby 3.2.x (3.2.4 - 3.2.7)
 # Source:  tebako gem lib/tebako/packager/pass2msys_patch.rb Pass2MSysPatch#io_c_patch (IO_C_MSYS_BASE_PATCH, IO_C_MSYS_PATCH[_PRE_32])
 #
 # msys: inject the tebako io headers, route open through tebako_open, and
@@ -9,10 +9,10 @@
 # (skip the cancelable wait).
 # X-Redesign: modern-api
 diff --git a/io.c b/io.c
-index 3d2e340..018bb45 100644
+index 3a704fa..4764405 100644
 --- a/io.c
 +++ b/io.c
-@@ -175,10 +175,16 @@ off_t __syscall(quad_t number, ...);
+@@ -169,10 +169,16 @@ off_t __syscall(quad_t number, ...);
  
  #define IO_MAX_BUFFER_GROWTH 8 * 1024 * 1024 // 8MB
  
@@ -29,8 +29,8 @@ index 3d2e340..018bb45 100644
 +#define open(p, f, m) tebako_open(3, (p), (f), (m))
  #undef rename
  #define rename(f, t)	rb_w32_urename((f), (t))
- #include "win32/file.h"
-@@ -514,7 +520,8 @@ rb_cloexec_fcntl_dupfd(int fd, int minfd)
+ #endif
+@@ -496,7 +502,8 @@ rb_cloexec_fcntl_dupfd(int fd, int minfd)
  
  #if defined(_WIN32)
  #define WAIT_FD_IN_WIN32(fptr) \

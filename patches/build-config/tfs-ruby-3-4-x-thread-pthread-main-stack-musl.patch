@@ -1,7 +1,7 @@
-# tfs-ruby-3-3-x-thread-pthread-musl-main-stack.patch
+# tfs-ruby-3-4-x-thread-pthread-main-stack-musl.patch
 #
 # Target:  thread_pthread.c (pass2 (linux-musl))
-# Applies: ruby 3.3.x (3.3.3 - 3.3.7)
+# Applies: ruby 3.4.x (3.4.1 - 3.4.2)
 # Source:  tebako gem lib/tebako/packager/patch_literals.rb PatchLiterals::LINUX_MUSL_THREAD_PTHREAD_PATCH
 #
 # musl: supply get_main_stack() from /proc/self/maps (ncopa's patch via
@@ -9,10 +9,10 @@
 # docker-library/ruby alpine images). musl has no get_main_stack
 # equivalent; breaks glibc only, which does not matter here.
 diff --git a/thread_pthread.c b/thread_pthread.c
-index 305cbdb..c258189 100644
+index 423814c..eaec38a 100644
 --- a/thread_pthread.c
 +++ b/thread_pthread.c
-@@ -1791,7 +1791,50 @@ size_t pthread_get_stacksize_np(pthread_t);
+@@ -1813,7 +1813,50 @@ size_t pthread_get_stacksize_np(pthread_t);
  #   define MAINSTACKADDR_AVAILABLE 0
  # endif
  #endif

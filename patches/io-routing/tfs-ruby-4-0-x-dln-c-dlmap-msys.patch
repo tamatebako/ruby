@@ -1,7 +1,7 @@
-# tfs-ruby-3-3-x-dln-c-msys-dlmap.patch
+# tfs-ruby-4-0-x-dln-c-dlmap-msys.patch
 #
 # Target:  dln.c (pass2 (msys))
-# Applies: ruby 3.3.x (3.3.3 - 3.3.7)
+# Applies: ruby 4.0.x (4.0.0 - 4.0.6)
 # Source:  tebako gem lib/tebako/packager/pass2_patch.rb Pass2Patch#dln_c_patch, patch_literals.rb DLN_C_MSYS_PATCH / DLN_C_MSYS_PATCH_PRE32
 #
 # msys: inject the tebako io headers and route dlopen of memfs paths
@@ -9,10 +9,10 @@
 # file before rb_w32_mbstr_to_wstr).
 # X-Redesign: modern-api
 diff --git a/dln.c b/dln.c
-index b4c2fb9..d2d71ed 100644
+index d43735f..b9bea79 100644
 --- a/dln.c
 +++ b/dln.c
-@@ -76,7 +76,13 @@ void *xrealloc();
+@@ -77,7 +77,13 @@ void *xrealloc();
  # include <unistd.h>
  #endif
  
@@ -26,7 +26,7 @@ index b4c2fb9..d2d71ed 100644
  static void
  dln_loaderror(const char *format, ...)
  {
-@@ -341,7 +347,24 @@ dln_open(const char *file)
+@@ -352,7 +358,24 @@ dln_open(const char *file)
      char message[1024];
  
      /* Convert the file path to wide char */

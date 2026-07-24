@@ -1,4 +1,4 @@
-# tfs-ruby-4-0-x-thread-pthread-musl-main-stack.patch
+# tfs-ruby-4-0-x-thread-pthread-main-stack-musl.patch
 #
 # Target:  thread_pthread.c (pass2 (linux-musl))
 # Applies: ruby 4.0.x (4.0.0 - 4.0.6)

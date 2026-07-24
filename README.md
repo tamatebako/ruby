@@ -38,9 +38,12 @@ diff was hand-written.
   gates `ONIG_EXTERN` to ruby 3.2.7 / 3.3.7 / 3.4+).
 - Slug suffixes encode the scenario: `-msys`, `-darwin`, `-musl` platform
   variants; `-pass1` / `-pass2` where the same file is patched differently in
-  the toolchain build vs the final build (`cygwin/GNUmakefile.in`). No suffix
-  means the patch is platform-independent (or applies to all non-msys
-  platforms, as stated in its header).
+  the toolchain build vs the final build (`cygwin/GNUmakefile.in`). Platform
+  markers are always the **terminal** slug element (e.g.
+  `dln-c-dlmap-msys`). No platform suffix means the patch is
+  platform-independent, or — when it shares its target file with a
+  platform-suffixed patch — the complementary variant for the other
+  platforms (e.g. `dir-c-memfs` vs `dir-c-memfs-msys`).
 
 **Supersede rule:** a patchlevel-specific file
 (`tfs-ruby-M-m-p-<slug>.patch`) supersedes the line-wide file

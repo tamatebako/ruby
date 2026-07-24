@@ -1,4 +1,4 @@
-# tfs-ruby-3-3-x-ruby-c-msys-memfs-path.patch
+# tfs-ruby-3-3-x-ruby-c-memfs-path-msys.patch
 #
 # Target:  ruby.c (pass2 (msys))
 # Applies: ruby 3.3.x (3.3.3 - 3.3.7)

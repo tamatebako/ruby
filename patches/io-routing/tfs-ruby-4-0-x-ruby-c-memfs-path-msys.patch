@@ -1,7 +1,7 @@
-# tfs-ruby-3-2-x-ruby-c-msys-memfs-path.patch
+# tfs-ruby-4-0-x-ruby-c-memfs-path-msys.patch
 #
 # Target:  ruby.c (pass2 (msys))
-# Applies: ruby 3.2.x (3.2.4 - 3.2.7)
+# Applies: ruby 4.0.x (4.0.0 - 4.0.6)
 # Source:  tebako gem lib/tebako/packager/pass2msys_patch.rb RUBY_C_MSYS_PATCHES
 #
 # msys: inject the tebako io headers and keep memfs paths as-is
@@ -9,7 +9,7 @@
 # when resolving the load path.
 # X-Redesign: modern-api
 diff --git a/ruby.c b/ruby.c
-index 920a249..5cde680 100644
+index 0d60ece..ce61e2b 100644
 --- a/ruby.c
 +++ b/ruby.c
 @@ -66,6 +66,11 @@
@@ -24,7 +24,7 @@ index 920a249..5cde680 100644
  #ifndef MAXPATHLEN
  # define MAXPATHLEN 1024
  #endif
-@@ -738,7 +743,12 @@ ruby_init_loadpath(void)
+@@ -758,7 +763,12 @@ ruby_init_loadpath(void)
      id_initial_load_path_mark = INITIAL_LOAD_PATH_MARK;
      while (*paths) {
          size_t len = strlen(paths);
