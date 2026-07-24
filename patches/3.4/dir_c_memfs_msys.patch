@@ -18,12 +18,13 @@ diff --git a/dir.c b/dir.c
 index b0ff322..1d39e60 100644
 --- a/dir.c
 +++ b/dir.c
-@@ -127,6 +127,163 @@ char *strchr(char*,char);
+@@ -127,6 +127,164 @@ char *strchr(char*,char);
  
  #define vm_initialized rb_cThread
  
 +/* -- Start of tebako patch -- */
 +#include <tebako/tebako-main.h> /* tebako_mount_point(): the compiled-in fs_mount_point */
++#include <string.h>               /* strlen/strncmp/memset/memcpy used below */
 +
 +/* ruby/win32.h maps 'stat' onto stati128; the libtfs C API fills the CRT
 +   struct stat, so keep the plain name visible inside this block */

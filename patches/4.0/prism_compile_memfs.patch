@@ -14,11 +14,12 @@ diff --git a/prism_compile.c b/prism_compile.c
 index 4b55775..860dd87 100644
 --- a/prism_compile.c
 +++ b/prism_compile.c
-@@ -1,4 +1,75 @@
+@@ -1,4 +1,76 @@
  #include "prism.h"
 +
 +/* -- Start of tebako patch -- */
 +#include <tebako/tebako-main.h> /* tebako_mount_point(): the compiled-in fs_mount_point */
++#include <string.h>               /* strlen/strncmp/memset/memcpy used below */
 +
 +/* ruby/win32.h maps 'stat' onto stati128 on _WIN32; the libtfs C API fills
 +   the CRT struct stat, so keep the plain name visible inside this block */
@@ -90,7 +91,7 @@ index 4b55775..860dd87 100644
  #include "ruby/version.h"
  
  /**
-@@ -11371,7 +11442,18 @@ pm_read_file(pm_string_t *string, const char *filepath)
+@@ -11371,7 +11443,18 @@ pm_read_file(pm_string_t *string, const char *filepath)
  VALUE
  pm_load_file(pm_parse_result_t *result, VALUE filepath, bool load_error)
  {

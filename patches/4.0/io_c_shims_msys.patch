@@ -17,12 +17,13 @@ diff --git a/io.c b/io.c
 index 3d2e340..018bb45 100644
 --- a/io.c
 +++ b/io.c
-@@ -175,10 +175,123 @@ off_t __syscall(quad_t number, ...);
+@@ -175,10 +175,124 @@ off_t __syscall(quad_t number, ...);
  
  #define IO_MAX_BUFFER_GROWTH 8 * 1024 * 1024 // 8MB
  
 +/* -- Start of tebako patch -- */
 +#include <tebako/tebako-main.h> /* tebako_mount_point(): the compiled-in fs_mount_point */
++#include <string.h>               /* strlen/strncmp/memset/memcpy used below */
 +
 +/* ruby/win32.h maps 'stat' onto stati128; the libtfs C API fills the CRT
 +   struct stat, so keep the plain name visible inside this block */
@@ -142,7 +143,7 @@ index 3d2e340..018bb45 100644
  #undef rename
  #define rename(f, t)	rb_w32_urename((f), (t))
  #include "win32/file.h"
-@@ -514,7 +627,8 @@ rb_cloexec_fcntl_dupfd(int fd, int minfd)
+@@ -514,7 +628,8 @@ rb_cloexec_fcntl_dupfd(int fd, int minfd)
  
  #if defined(_WIN32)
  #define WAIT_FD_IN_WIN32(fptr) \

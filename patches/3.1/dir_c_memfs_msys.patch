@@ -18,12 +18,13 @@ diff --git a/dir.c b/dir.c
 index 1b65190..06cefb0 100644
 --- a/dir.c
 +++ b/dir.c
-@@ -126,6 +126,163 @@ char *strchr(char*,char);
+@@ -126,6 +126,164 @@ char *strchr(char*,char);
  
  #define vm_initialized rb_cThread
  
 +/* -- Start of tebako patch -- */
 +#include <tebako/tebako-main.h> /* tebako_mount_point(): the compiled-in fs_mount_point */
++#include <string.h>               /* strlen/strncmp/memset/memcpy used below */
 +
 +/* ruby/win32.h maps 'stat' onto stati128; the libtfs C API fills the CRT
 +   struct stat, so keep the plain name visible inside this block */
@@ -182,7 +183,7 @@ index 1b65190..06cefb0 100644
  /* define system APIs */
  #ifdef _WIN32
  # undef chdir
-@@ -550,7 +707,7 @@ dir_initialize(rb_execution_context_t *ec, VALUE dir, VALUE dirname, VALUE enc)
+@@ -550,7 +708,7 @@ dir_initialize(rb_execution_context_t *ec, VALUE dir, VALUE dirname, VALUE enc)
  	    dp->dir = opendir_without_gvl(path);
  	}
  #ifdef HAVE_GETATTRLIST
@@ -191,7 +192,7 @@ index 1b65190..06cefb0 100644
  	    u_int32_t attrbuf[1];
  	    struct attrlist al = {ATTR_BIT_MAP_COUNT, 0};
  	    if (getattrlist(path, &al, attrbuf, sizeof(attrbuf), FSOPT_NOFOLLOW) == 0) {
-@@ -2289,7 +2446,8 @@ glob_helper(
+@@ -2289,7 +2447,8 @@ glob_helper(
  	    break;
  	  case ALPHA:
  #if USE_NAME_ON_FS == USE_NAME_ON_FS_REAL_BASENAME
@@ -201,7 +202,7 @@ index 1b65190..06cefb0 100644
  #else
  	    magical = 1;
  #endif
-@@ -2403,7 +2561,7 @@ glob_helper(
+@@ -2403,7 +2562,7 @@ glob_helper(
  	}
  # endif
  # ifdef HAVE_GETATTRLIST
@@ -210,7 +211,7 @@ index 1b65190..06cefb0 100644
  	    flags |= FNM_CASEFOLD;
  # endif
          ruby_glob_entries_t globent;
-@@ -2576,7 +2734,7 @@ glob_helper(
+@@ -2576,7 +2735,7 @@ glob_helper(
  		    break;
  		}
  #if USE_NAME_ON_FS == USE_NAME_ON_FS_REAL_BASENAME
@@ -219,7 +220,7 @@ index 1b65190..06cefb0 100644
  		    buf = replace_real_basename(buf, pathlen + (dirsep != 0), enc,
  						IF_NORMALIZE_UTF8PATH(1)+0,
  						flags, &new_pathtype);
-@@ -3321,6 +3479,8 @@ rb_dir_s_empty_p(VALUE obj, VALUE dirname)
+@@ -3321,6 +3480,8 @@ rb_dir_s_empty_p(VALUE obj, VALUE dirname)
      path = RSTRING_PTR(dirname);
  
  #if defined HAVE_GETATTRLIST && defined ATTR_DIR_ENTRYCOUNT

@@ -16,12 +16,13 @@ diff --git a/file.c b/file.c
 index 373788b..4da03d0 100644
 --- a/file.c
 +++ b/file.c
-@@ -93,6 +93,165 @@ int flock(int, int);
+@@ -93,6 +93,166 @@ int flock(int, int);
  # define lstat stat
  #endif
  
 +/* -- Start of tebako patch -- */
 +#include <tebako/tebako-main.h> /* tebako_mount_point(): the compiled-in fs_mount_point */
++#include <string.h>               /* strlen/strncmp/memset/memcpy used below */
 +
 +/* ruby/win32.h maps 'stat' onto stati128 on _WIN32; the libtfs C API fills
 +   the CRT struct stat, so keep the plain name visible inside this block */

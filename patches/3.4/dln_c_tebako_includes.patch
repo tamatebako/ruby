@@ -14,12 +14,13 @@ diff --git a/dln.c b/dln.c
 index cd9792c..c079338 100644
 --- a/dln.c
 +++ b/dln.c
-@@ -76,7 +76,31 @@ void *xrealloc();
+@@ -76,7 +76,32 @@ void *xrealloc();
  # include <unistd.h>
  #endif
  
 +/* -- Start of tebako patch -- */
 +#include <tebako/tebako-main.h> /* tebako_mount_point(): the compiled-in fs_mount_point */
++#include <string.h>               /* strlen/strncmp/memset/memcpy used below */
 +
 +/* Route check: is path inside the memfs mount? (mount-point prefix check vs
 +   the compiled-in fs_mount_point; the memfs is read-only -- writes/cwd go to
@@ -46,7 +47,7 @@ index cd9792c..c079338 100644
  static void
  dln_loaderror(const char *format, ...)
  {
-@@ -383,7 +405,22 @@ dln_open(const char *file)
+@@ -383,7 +408,22 @@ dln_open(const char *file)
  # endif
  
      /* Load file */

@@ -16,12 +16,13 @@ diff --git a/io.c b/io.c
 index 3d2e340..f6ee8e6 100644
 --- a/io.c
 +++ b/io.c
-@@ -175,6 +175,98 @@ off_t __syscall(quad_t number, ...);
+@@ -175,6 +175,99 @@ off_t __syscall(quad_t number, ...);
  
  #define IO_MAX_BUFFER_GROWTH 8 * 1024 * 1024 // 8MB
  
 +/* -- Start of tebako patch -- */
 +#include <tebako/tebako-main.h> /* tebako_mount_point(): the compiled-in fs_mount_point */
++#include <string.h>               /* strlen/strncmp/memset/memcpy used below */
 +#include <tebako/fs/c_api.h>     /* modern libtfs C API (tebako_fs_*) */
 +
 +/* Route check: is path inside the memfs mount? (mount-point prefix check vs
