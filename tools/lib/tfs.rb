@@ -10,4 +10,7 @@ module Tfs
   autoload :PatchSelection, "tfs/patch_selection"
   autoload :SchemaLint, "tfs/schema_lint"
   autoload :SourcePrep, "tfs/source_prep"
+  autoload :HttpGet, "tfs/http_get"
+  autoload :RubyReleases, "tfs/ruby_releases"
+  autoload :Onboarder, "tfs/onboarder"
 end

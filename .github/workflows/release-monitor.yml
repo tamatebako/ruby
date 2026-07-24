@@ -1,0 +1,86 @@
+name: release-monitor
+
+on:
+  schedule:
+    - cron: "17 6 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  pull-requests: write
+  issues: write
+
+jobs:
+  detect:
+    name: detect new ruby releases
+    runs-on: ubuntu-latest
+    outputs:
+      versions: ${{ steps.detect.outputs.versions }}
+      count: ${{ steps.detect.outputs.count }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: ruby/setup-ruby@v1
+        with:
+          ruby-version: "3.2"
+          bundler-cache: true
+      - id: detect
+        run: |
+          out=$(bundle exec tools/monitor --detect)
+          echo "versions=$out" >> "$GITHUB_OUTPUT"
+          echo "count=$(jq '.version | length' <<< "$out")" >> "$GITHUB_OUTPUT"
+
+  onboard:
+    name: onboard ${{ matrix.version }}
+    needs: detect
+    if: needs.detect.outputs.count != '0'
+    strategy:
+      fail-fast: false
+      matrix: ${{ fromJSON(needs.detect.outputs.versions) }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: ruby/setup-ruby@v1
+        with:
+          ruby-version: "3.2"
+          bundler-cache: true
+      - name: onboard (versions.yml + manifests + lint)
+        run: bundle exec tools/monitor --onboard "${{ matrix.version }}"
+      - name: job summary
+        if: always()
+        run: cat monitor-result.json >> "$GITHUB_STEP_SUMMARY"
+      - name: open pull request
+        if: success()
+        uses: peter-evans/create-pull-request@v7
+        with:
+          branch: onboard/ruby-${{ matrix.version }}
+          title: "Onboard ruby ${{ matrix.version }}"
+          commit-message: "Onboard ruby ${{ matrix.version }} (release monitor)"
+          body: |
+            Automated onboarding of ruby **${{ matrix.version }}** by the release monitor.
+
+            - `versions.yml` entry added (official URL + sha256 of the official tarball)
+            - patch manifest seeded / partition extended / overlay carried as needed
+            - `git apply --check` clean for the whole resolved patch set
+
+            Merging runs the lint matrix for ${{ matrix.version }}; tag `v*` afterwards to build `tfs-ruby-${{ matrix.version }}-src.tar.gz` via release-src.
+      - name: file issue on failing patches
+        if: failure()
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh issue create \
+            --title "Onboard ruby ${{ matrix.version }}: patches fail to apply" \
+            --body "The release monitor could not onboard ruby **${{ matrix.version }}** -- some patches do not apply to the official tarball. No release was made.
+
+          Failing patches and full result:
+          \`\`\`json
+          $(cat monitor-result.json)
+          \`\`\`"
+      - name: notify downstream runtime (optional)
+        if: success() && vars.RELEASE_MONITOR_DISPATCH == 'true'
+        env:
+          GH_TOKEN: ${{ secrets.TEBAKO_DISPATCH_TOKEN }}
+        run: |
+          gh api repos/tamatebako/tebako-runtime-ruby/dispatches \
+            -f event_type='tebako release' \
+            -F 'client_payload[version]=${{ matrix.version }}'

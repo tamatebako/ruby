@@ -25,6 +25,29 @@ module Tfs
     # A patch failed git apply / git apply --check.
     class ApplyError < Error; end
 
+    # One audit outcome: a patch checked against the pristine tree.
+    class Outcome
+      def initialize(patch:, status:, detail:)
+        @patch = patch
+        @status = status
+        @detail = detail
+      end
+
+      attr_reader :patch, :status, :detail
+
+      def ok?
+        @status == :ok
+      end
+
+      def deferred?
+        @status == :deferred
+      end
+
+      def failed?
+        @status == :failed
+      end
+    end
+
     DEFAULT_CACHE_DIR = File.expand_path("../../../.cache/tarballs", __dir__).freeze
     MAX_REDIRECTS = 5
 
@@ -50,10 +73,37 @@ module Tfs
     # git apply --check of every selected patch against the pristine tree.
     # Returns the names of the patches that apply cleanly.
     def check(version_name, outdir)
-      tree = pristine_tree(version_name, outdir)
-      @selection.for(version_name).filter_map do |patch|
-        patch.name if apply(tree, patch, version_name, ["--check"])
+      audit(version_name, outdir).filter_map do |outcome|
+        raise ApplyError, outcome.detail if outcome.failed?
+
+        outcome.patch.name if outcome.ok?
       end
+    end
+
+    # Per-patch check outcomes against the pristine tree: each selected
+    # patch (or an explicitly given set) is tried with git apply --check
+    # and reported :ok, :deferred (target absent pre-configure) or
+    # :failed, without raising. Used by the release monitor.
+    def audit(version_name, outdir, patches: nil)
+      tree = pristine_tree(version_name, outdir)
+      (patches || @selection.for(version_name)).map do |patch|
+        begin
+          applied = apply(tree, patch, version_name, ["--check"])
+          Outcome.new(patch: patch, status: applied ? :ok : :deferred, detail: nil)
+        rescue ApplyError => e
+          Outcome.new(patch: patch, status: :failed, detail: e.message)
+        end
+      end
+    end
+
+    # Downloads a tarball URL into the cache (no-op when already cached)
+    # and returns [path, sha256]. No manifest verification: used to pin
+    # the sha256 of a NEW official release before it enters versions.yml.
+    def fetch_tarball(url, file_name)
+      FileUtils.mkdir_p(@cache_dir)
+      dest = File.join(@cache_dir, file_name)
+      download_to(url, dest) unless File.file?(dest)
+      [dest, sha256(dest)]
     end
 
     # Fetch + verify + extract only: returns <outdir>/ruby-<version>.
@@ -93,14 +143,14 @@ module Tfs
       return tarball if File.file?(tarball) && sha256(tarball) == entry.sha256
 
       FileUtils.rm_f(tarball)
-      download(entry, tarball)
+      download_to(entry.url, tarball)
       return tarball if sha256(tarball) == entry.sha256
 
       raise IntegrityError, "#{entry.name}: sha256 mismatch for #{entry.tarball_name} from #{entry.url}"
     end
 
-    def download(entry, dest)
-      uri = URI.parse(entry.url)
+    def download_to(url, dest)
+      uri = URI.parse(url)
       MAX_REDIRECTS.times do
         Net::HTTP.start(uri.host, uri.port, use_ssl: uri.scheme == "https") do |http|
           http.request(Net::HTTP::Get.new(uri)) do |response|
@@ -112,14 +162,14 @@ module Tfs
             when Net::HTTPRedirection
               uri = URI.parse(response.fetch("location"))
             else
-              raise DownloadError, "#{entry.name}: HTTP #{response.code} from #{uri}"
+              raise DownloadError, "HTTP #{response.code} from #{uri}"
             end
           end
         end
       end
-      raise DownloadError, "#{entry.name}: too many redirects from #{entry.url}"
+      raise DownloadError, "too many redirects from #{url}"
     rescue SystemCallError, SocketError, Timeout::Error => e
-      raise DownloadError, "#{entry.name}: cannot download #{uri}: #{e.message}"
+      raise DownloadError, "cannot download #{uri}: #{e.message}"
     end
 
     def extract(tarball, outdir)

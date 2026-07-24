@@ -49,7 +49,17 @@ module Tfs
     end
 
     # Raised when a version's set cannot be resolved from the manifests.
-    class SelectionError < StandardError; end
+    # Carries the offending feature (nil for structural failures such as a
+    # missing line manifest) so callers can react per feature.
+    class SelectionError < StandardError
+      def initialize(message, feature: nil, version_name: nil)
+        super(message)
+        @feature = feature
+        @version_name = version_name
+      end
+
+      attr_reader :feature, :version_name
+    end
 
     DEFAULT_ROOT = File.expand_path("../../../patches", __dir__).freeze
 
@@ -105,8 +115,10 @@ module Tfs
       exact = entries.select { |entry| entry.exact_for?(patchlevel) }
       chosen = exact.any? ? exact : entries.select(&:whole_line?)
       if chosen.empty?
-        raise SelectionError,
-              "#{version_name}: feature #{feature} has no entry covering patch level #{patchlevel}"
+        raise SelectionError.new(
+          "#{version_name}: feature #{feature} has no entry covering patch level #{patchlevel}",
+          feature: feature, version_name: version_name
+        )
       end
 
       chosen.map do |entry|
