@@ -1,12 +1,21 @@
 #!/usr/bin/env ruby
 # frozen_string_literal: true
 
-# Usage: tools/versions
+# Usage: tools/versions [--scenarios]
 # Prints the supported version list from versions.yml as a compact
-# GitHub-Actions matrix document: {"version":["3.1.6",...]}.
+# GitHub-Actions matrix document.
+# Default: {"version":["3.1.6",...]} -- one leg per version.
+# --scenarios: {"include":[{"version":...,"platform":...,"pass":...,
+# "suffix":...},...]} -- one leg per (version x scenario build) declared
+# in versions.yml, for release-src's per-platform source tarballs.
 
 $LOAD_PATH.unshift(File.expand_path("lib", __dir__))
 require "tfs"
 require "json"
 
-puts JSON.generate({ version: Tfs::Versions.new.names })
+versions = Tfs::Versions.new
+if ARGV == ["--scenarios"]
+  puts JSON.generate({ include: versions.builds })
+else
+  puts JSON.generate({ version: versions.names })
+end

@@ -12,7 +12,7 @@ on:
 
 jobs:
   versions:
-    name: emit version matrix
+    name: emit version x scenario matrix
     runs-on: ubuntu-latest
     outputs:
       matrix: ${{ steps.emit.outputs.matrix }}
@@ -22,10 +22,10 @@ jobs:
         with:
           ruby-version: "3.2"
       - id: emit
-        run: echo "matrix=$(tools/versions)" >> "$GITHUB_OUTPUT"
+        run: echo "matrix=$(tools/versions --scenarios)" >> "$GITHUB_OUTPUT"
 
   build:
-    name: tfs-ruby-${{ matrix.version }}-src
+    name: tfs-ruby-${{ matrix.version }}-src${{ matrix.suffix }}
     needs: versions
     strategy:
       fail-fast: false
@@ -40,22 +40,22 @@ jobs:
       - name: validate manifests against schema
         run: bundle exec tools/validate_manifests
       - name: apply patches
-        run: tools/apply "${{ matrix.version }}" "$PWD/build"
+        run: tools/apply "${{ matrix.version }}" "$PWD/build" --platform "${{ matrix.platform }}" --pass "${{ matrix.pass }}"
       - name: package
         working-directory: build
         run: |
-          tar -czf "tfs-ruby-${{ matrix.version }}-src.tar.gz" "tfs-ruby-${{ matrix.version }}-src"
-          sha256sum "tfs-ruby-${{ matrix.version }}-src.tar.gz" > "tfs-ruby-${{ matrix.version }}-src.tar.gz.sha256"
+          tar -czf "tfs-ruby-${{ matrix.version }}-src${{ matrix.suffix }}.tar.gz" "tfs-ruby-${{ matrix.version }}-src"
+          sha256sum "tfs-ruby-${{ matrix.version }}-src${{ matrix.suffix }}.tar.gz" > "tfs-ruby-${{ matrix.version }}-src${{ matrix.suffix }}.tar.gz.sha256"
       - name: extract-verify
         working-directory: build
         run: |
           mkdir verify
-          tar -xzf "tfs-ruby-${{ matrix.version }}-src.tar.gz" -C verify
+          tar -xzf "tfs-ruby-${{ matrix.version }}-src${{ matrix.suffix }}.tar.gz" -C verify
           diff -qr "tfs-ruby-${{ matrix.version }}-src" "verify/tfs-ruby-${{ matrix.version }}-src"
       - uses: actions/upload-artifact@v4
         with:
-          name: tfs-ruby-${{ matrix.version }}-src
-          path: build/tfs-ruby-${{ matrix.version }}-src.tar.gz*
+          name: tfs-ruby-${{ matrix.version }}-src${{ matrix.suffix }}
+          path: build/tfs-ruby-${{ matrix.version }}-src${{ matrix.suffix }}.tar.gz*
           retention-days: 1
 
   publish:
@@ -67,7 +67,7 @@ jobs:
     steps:
       - uses: actions/download-artifact@v4
         with:
-          pattern: tfs-ruby-*-src
+          pattern: tfs-ruby-*-src*
           path: dist
           merge-multiple: true
       - name: SHA256SUMS
