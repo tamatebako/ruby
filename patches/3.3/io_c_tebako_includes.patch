@@ -16,7 +16,7 @@ diff --git a/io.c b/io.c
 index 17f8d57..a971dcf 100644
 --- a/io.c
 +++ b/io.c
-@@ -164,6 +164,99 @@ off_t __syscall(quad_t number, ...);
+@@ -164,6 +164,134 @@ off_t __syscall(quad_t number, ...);
  
  #define IO_MAX_BUFFER_GROWTH 8 * 1024 * 1024 // 8MB
  
@@ -105,12 +105,47 @@ index 17f8d57..a971dcf 100644
 +    return fstat(fd, st);
 +}
 +
++
++/* fcntl on a memfs fd: the memfs is read-only, so the flag state is
++   emulated (FD_CLOEXEC stored, status flags report O_RDONLY); calls on host
++   fds pass through to the real fcntl */
++static int
++tfs_fcntl(int fd, int cmd, ...)
++{
++    static int cloexec_flags;
++    va_list ap;
++    int arg = 0;
++
++    va_start(ap, cmd);
++    arg = va_arg(ap, int);
++    va_end(ap);
++
++    if (!tebako_fd_is_embedded(fd)) {
++        return fcntl(fd, cmd, arg);
++    }
++    switch (cmd) {
++    case F_GETFD:
++        return cloexec_flags;
++    case F_SETFD:
++        cloexec_flags = arg;
++        return 0;
++    case F_GETFL:
++        return O_RDONLY;
++    case F_SETFL:
++        return 0;
++    default:
++        errno = EINVAL;
++        return -1;
++    }
++}
++
 +#define open(...) tfs_open(__VA_ARGS__)
 +#define read(...) tfs_read(__VA_ARGS__)
 +#define pread(...) tfs_pread(__VA_ARGS__)
 +#define lseek(...) tfs_lseek(__VA_ARGS__)
 +#define close(...) tfs_close(__VA_ARGS__)
 +#define fstat(...) tfs_fstat(__VA_ARGS__)
++#define fcntl(...) tfs_fcntl(__VA_ARGS__)
 +/* -- End of tebako patch -- */
 +
  /* define system APIs */

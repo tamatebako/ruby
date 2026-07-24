@@ -61,6 +61,8 @@ patches:
     file: mkconfig_memfs_prefix.patch
   - feature: mkconfig_memfs_prefix_msys
     file: mkconfig_memfs_prefix_msys.patch
+  - feature: ruby_c_fcntl_shim
+    file: ruby_c_fcntl_shim.patch
   - feature: ruby_c_memfs_path_msys
     file: ruby_c_memfs_path_msys.patch
   - feature: win32_file_c_tebako_load_ok_msys

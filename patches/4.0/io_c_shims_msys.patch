@@ -17,7 +17,7 @@ diff --git a/io.c b/io.c
 index 3d2e340..018bb45 100644
 --- a/io.c
 +++ b/io.c
-@@ -175,10 +175,124 @@ off_t __syscall(quad_t number, ...);
+@@ -175,10 +175,159 @@ off_t __syscall(quad_t number, ...);
  
  #define IO_MAX_BUFFER_GROWTH 8 * 1024 * 1024 // 8MB
  
@@ -128,11 +128,46 @@ index 3d2e340..018bb45 100644
 +}
 +#pragma pop_macro("stat")
 +
++
++/* fcntl on a memfs fd: the memfs is read-only, so the flag state is
++   emulated (FD_CLOEXEC stored, status flags report O_RDONLY); calls on host
++   fds pass through to the real fcntl */
++static int
++tfs_fcntl(int fd, int cmd, ...)
++{
++    static int cloexec_flags;
++    va_list ap;
++    int arg = 0;
++
++    va_start(ap, cmd);
++    arg = va_arg(ap, int);
++    va_end(ap);
++
++    if (!tebako_fd_is_embedded(fd)) {
++        return fcntl(fd, cmd, arg);
++    }
++    switch (cmd) {
++    case F_GETFD:
++        return cloexec_flags;
++    case F_SETFD:
++        cloexec_flags = arg;
++        return 0;
++    case F_GETFL:
++        return O_RDONLY;
++    case F_SETFL:
++        return 0;
++    default:
++        errno = EINVAL;
++        return -1;
++    }
++}
++
 +#define rb_w32_read(...) tfs_read(__VA_ARGS__)
 +#define rb_w32_pread(...) tfs_pread(__VA_ARGS__)
 +#define rb_w32_lseek(...) tfs_lseek(__VA_ARGS__)
 +#define rb_w32_close(...) tfs_close(__VA_ARGS__)
 +#define rb_w32_fstati128(...) tfs_fstati128(__VA_ARGS__)
++#define fcntl(...) tfs_fcntl(__VA_ARGS__)
 +/* -- End of tebako patch -- */
 +
  /* define system APIs */
@@ -143,7 +178,7 @@ index 3d2e340..018bb45 100644
  #undef rename
  #define rename(f, t)	rb_w32_urename((f), (t))
  #include "win32/file.h"
-@@ -514,7 +628,8 @@ rb_cloexec_fcntl_dupfd(int fd, int minfd)
+@@ -514,7 +663,8 @@ rb_cloexec_fcntl_dupfd(int fd, int minfd)
  
  #if defined(_WIN32)
  #define WAIT_FD_IN_WIN32(fptr) \
