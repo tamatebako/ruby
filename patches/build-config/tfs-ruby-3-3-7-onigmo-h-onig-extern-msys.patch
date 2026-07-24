@@ -1,0 +1,22 @@
+# tfs-ruby-3-3-7-onigmo-h-onig-extern-msys.patch
+#
+# Target:  include/ruby/onigmo.h (pass1 (msys, ruby 3.2.7 / 3.3.7 / 3.4+))
+# Applies: ruby 3.3.7 only
+# Source:  tebako gem lib/tebako/packager/pass1_patch.rb Pass1MSysPatch::INCLUDE_RUBY_ONIGMO_H_PATCH
+#
+# msys: RUBY_EXTERN shall be extern for a static build but is set to
+# __declspec(dllimport) for the encoding library; define ONIG_EXTERN as
+# plain extern.
+diff --git a/include/ruby/onigmo.h b/include/ruby/onigmo.h
+index db290cd..bc68841 100644
+--- a/include/ruby/onigmo.h
++++ b/include/ruby/onigmo.h
+@@ -43,7 +43,7 @@ extern "C" {
+ 
+ #ifndef ONIG_EXTERN
+ # ifdef RUBY_EXTERN
+-#  define ONIG_EXTERN   RUBY_EXTERN
++#  define ONIG_EXTERN  extern
+ # else
+ #  if defined(_WIN32) && !defined(__GNUC__)
+ #   if defined(EXPORT) || defined(RUBY_EXPORT)

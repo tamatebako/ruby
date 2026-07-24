@@ -1,0 +1,21 @@
+# tfs-ruby-3-1-x-common-mk-exts-mk-dep.patch
+#
+# Target:  common.mk (pass2 (linux gnu/musl, macos))
+# Applies: ruby 3.1.x (3.1.6)
+# Source:  tebako gem lib/tebako/packager/patch_buildsystem.rb PatchBuildsystem::COMMON_MK_PATCH
+#
+# Force rebuild of extinit.c when exts.mk changes (exts.mk changes when
+# extensions are rebuilt to make them statically linked).
+diff --git a/common.mk b/common.mk
+index 722c41f..900e0e3 100644
+--- a/common.mk
++++ b/common.mk
+@@ -310,7 +310,7 @@ build-ext: $(EXTS_MK)
+ exts-note: $(EXTS_MK)
+ 	$(Q)$(MAKE) $(EXTS_NOTE)
+ 
+-ext/extinit.c: $(srcdir)/template/extinit.c.tmpl $(PREP)
++ext/extinit.c: $(srcdir)/template/extinit.c.tmpl $(PREP) $(EXTS_MK)
+ 	$(MAKEDIRS) $(@D)
+ 	$(Q)$(MINIRUBY) $(tooldir)/generic_erb.rb -o $@ -c \
+ 	    $(srcdir)/template/extinit.c.tmpl $(EXTINITS)

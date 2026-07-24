@@ -1,0 +1,18 @@
+# tfs-ruby-4-0-x-ext-setup-nodynamic.patch
+#
+# Target:  ext/Setup (pass1 (all platforms))
+# Applies: ruby 4.0.x (4.0.0 - 4.0.6)
+# Source:  tebako gem lib/tebako/packager/pass1_patch.rb Pass1Patch::EXT_SETUP_PATCH
+#
+# Disable dynamic extensions: enable 'option nodynamic' so extensions are
+# built statically.
+diff --git a/ext/Setup b/ext/Setup
+index 9c3e2f4..2d90681 100644
+--- a/ext/Setup
++++ b/ext/Setup
+@@ -1,4 +1,4 @@
+-#option nodynamic
++option nodynamic
+ 
+ #bigdecimal
+ #cgi/escape

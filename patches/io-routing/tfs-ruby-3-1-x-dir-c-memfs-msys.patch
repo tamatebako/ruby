@@ -1,0 +1,73 @@
+# tfs-ruby-3-1-x-dir-c-memfs-msys.patch
+#
+# Target:  dir.c (pass2 (msys))
+# Applies: ruby 3.1.x (3.1.6)
+# Source:  tebako gem lib/tebako/packager/pass2_patch.rb Pass2Patch#dir_c_patch, patch_literals.rb DIR_C_BASE_PATCH
+#
+# msys variant of the dir.c memfs patch: inject the tebako memfs io
+# headers (anchored at '/* define system APIs */') and apply the same
+# getattrlist / case-sensitivity fast-path guards as the non-msys patch.
+# X-Redesign: modern-api
+diff --git a/dir.c b/dir.c
+index 1b65190..06cefb0 100644
+--- a/dir.c
++++ b/dir.c
+@@ -126,6 +126,12 @@ char *strchr(char*,char);
+ 
+ #define vm_initialized rb_cThread
+ 
++/* -- Start of tebako patch -- */
++#include <tebako/tebako-config.h>
++#include <tebako/tebako-defines.h>
++#include <tebako/tebako-io.h>
++/* -- End of tebako patch -- */
++
+ /* define system APIs */
+ #ifdef _WIN32
+ # undef chdir
+@@ -550,7 +556,7 @@ dir_initialize(rb_execution_context_t *ec, VALUE dir, VALUE dirname, VALUE enc)
+ 	    dp->dir = opendir_without_gvl(path);
+ 	}
+ #ifdef HAVE_GETATTRLIST
+-	else if (e == EIO) {
++	else if (e == EIO /* tebako patch */ && !within_tebako_memfs(path)) {
+ 	    u_int32_t attrbuf[1];
+ 	    struct attrlist al = {ATTR_BIT_MAP_COUNT, 0};
+ 	    if (getattrlist(path, &al, attrbuf, sizeof(attrbuf), FSOPT_NOFOLLOW) == 0) {
+@@ -2289,7 +2295,8 @@ glob_helper(
+ 	    break;
+ 	  case ALPHA:
+ #if USE_NAME_ON_FS == USE_NAME_ON_FS_REAL_BASENAME
+-	    plain = 1;
++      /* tebako patch */ if (!within_tebako_memfs(path)) plain = 1; else magical = 1;
++
+ #else
+ 	    magical = 1;
+ #endif
+@@ -2403,7 +2410,7 @@ glob_helper(
+ 	}
+ # endif
+ # ifdef HAVE_GETATTRLIST
+-	if (is_case_sensitive(dirp, path) == 0)
++	if (is_case_sensitive(dirp, path) == 0 /* tebako patch */ && !within_tebako_memfs(path))
+ 	    flags |= FNM_CASEFOLD;
+ # endif
+         ruby_glob_entries_t globent;
+@@ -2576,7 +2583,7 @@ glob_helper(
+ 		    break;
+ 		}
+ #if USE_NAME_ON_FS == USE_NAME_ON_FS_REAL_BASENAME
+-		if ((*cur)->type == ALPHA) {
++		if ((*cur)->type == ALPHA /* tebako patch */ && !within_tebako_memfs(buf)) {
+ 		    buf = replace_real_basename(buf, pathlen + (dirsep != 0), enc,
+ 						IF_NORMALIZE_UTF8PATH(1)+0,
+ 						flags, &new_pathtype);
+@@ -3321,6 +3328,8 @@ rb_dir_s_empty_p(VALUE obj, VALUE dirname)
+     path = RSTRING_PTR(dirname);
+ 
+ #if defined HAVE_GETATTRLIST && defined ATTR_DIR_ENTRYCOUNT
++    /* tebako patch */ if (!within_tebako_memfs(path))
++
+     {
+ 	u_int32_t attrbuf[SIZEUP32(fsobj_tag_t)];
+ 	struct attrlist al = {ATTR_BIT_MAP_COUNT, 0, ATTR_CMN_OBJTAG,};

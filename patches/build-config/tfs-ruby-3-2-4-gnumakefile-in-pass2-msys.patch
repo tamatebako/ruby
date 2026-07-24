@@ -1,0 +1,60 @@
+# tfs-ruby-3-2-4-gnumakefile-in-pass2-msys.patch
+#
+# Target:  cygwin/GNUmakefile.in (pass2 (msys, final build))
+# Applies: ruby 3.2.4 only
+# Source:  tebako gem lib/tebako/packager/pass2msys_patch.rb Pass2MSysPatch#gnumakefile_in_patch_p2
+#
+# msys pass2: same GNUmakefile adjustments as pass1, plus 'kill' ruby.exp
+# regeneration (pass2 reuses pass1 output for implib generation) and
+# introduce a LIBRUBY dependency on static extensions.
+diff --git a/cygwin/GNUmakefile.in b/cygwin/GNUmakefile.in
+index 43e92a2..1c0ffed 100644
+--- a/cygwin/GNUmakefile.in
++++ b/cygwin/GNUmakefile.in
+@@ -42,6 +42,12 @@ override EXTOBJS += $(if $(filter-out $(RUBYW_INSTALL_NAME),$(@:$(EXEEXT)=)),$(R
+ RCFILES = $(RUBY_INSTALL_NAME).rc $(RUBYW_INSTALL_NAME).rc $(DLL_BASE_NAME).rc
+ RUBYDEF = $(DLL_BASE_NAME).def
+ 
++# Start of tebako patch
++WINMAINOBJ    = win32/winmain.$(OBJEXT)
++$(WINMAINOBJ): win32/winmain.c
++# End of tebako patch
++
++
+ ruby: $(PROGRAM)
+ rubyw: $(WPROGRAM)
+ 
+@@ -59,21 +65,24 @@ $(RUBY_EXP) $(LIBRUBY_SO): $(DLL_BASE_NAME).res.$(OBJEXT)
+ 	  -so_name=$(DLL_BASE_NAME) -output=$(*F) \
+ 	  . $(icondirs) $(srcdir)/win32
+ 
+-$(PROGRAM): $(RUBY_INSTALL_NAME).res.$(OBJEXT)
+-$(WPROGRAM): $(RUBYW_INSTALL_NAME).res.$(OBJEXT)
++$(PROGRAM): $(RUBY_INSTALL_NAME).res.$(OBJEXT) $(LIBRUBY_A) # tebako patched
++$(LIBRUBY_A): $(LIBRUBY_A_OBJS) $(INITOBJS) # tebako patched
++
++$(WPROGRAM): $(RUBYW_INSTALL_NAME).res.$(OBJEXT) $(WINMAINOBJ)  # tebako patched
+ 	@rm -f $@
+ 	$(ECHO) linking $@
+ 	$(Q) $(PURIFY) $(CC) -mwindows -e $(SYMBOL_PREFIX)mainCRTStartup $(LDFLAGS) $(XLDFLAGS) \
+-	  $(MAINOBJ) $(EXTOBJS) $(LIBRUBYARG) $(LIBS) -o $@
++	  $(WINMAINOBJ) $(EXTOBJS) $(LIBRUBYARG) -Wl,--start-group $(MAINLIBS) -Wl,--end-group -o $@  # tebako
+ $(STUBPROGRAM): $(RUBY_INSTALL_NAME).res.$(OBJEXT)
+ 
+-$(RUBY_EXP): $(LIBRUBY_A)
++dummy.exp: $(LIBRUBY_A) # tebako patched
+ 	$(ECHO) creating $@
+-	$(Q) $(DLLWRAP) \
+-	  --output-exp=$(RUBY_EXP) \
+-	  --export-all $(LIBRUBY_A) $(LIBS) -o $(PROGRAM)
+-	$(Q) $(LDSHARED) $(DLDFLAGS) $(OBJS) dmyext.o $(SOLIBS) -o $(PROGRAM)
+-	@rm -f $(PROGRAM)
++	$(Q) dlltool --output-lib=$(LIBRUBY) --output-def=tebako.def --export-all $(LIBRUBY_A) --output-exp=$(RUBY_EXP)   # tebako patched
++
++	  # tebako patched --output-exp=$(RUBY_EXP) \
++	  # tebako patched --export-all $(LIBRUBY_A) $(LIBS) -o $(PROGRAM)
++# tebako patched  $(Q) $(LDSHARED) $(DLDFLAGS) $(OBJS) dmyext.o $(SOLIBS) -o $(PROGRAM)
++	# tebako patched @rm -f $(PROGRAM)
+ 
+ GNUmakefile:	$(srcdir)/cygwin/GNUmakefile.in
+ 

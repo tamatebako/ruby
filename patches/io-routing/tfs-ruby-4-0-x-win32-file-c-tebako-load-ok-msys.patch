@@ -1,0 +1,39 @@
+# tfs-ruby-4-0-x-win32-file-c-tebako-load-ok-msys.patch
+#
+# Target:  win32/file.c (pass2 (msys))
+# Applies: ruby 4.0.x (4.0.0 - 4.0.6)
+# Source:  tebako gem lib/tebako/packager/pass2msys_patch.rb WIN32_FILE_C_MSYS_PATCHES
+#
+# msys: inject the tebako io headers and return early from the UTF-8 ->
+# wide-char path conversion when the file is loadable from the memfs
+# (tebako_file_load_ok).
+# X-Redesign: modern-api
+diff --git a/win32/file.c b/win32/file.c
+index 26b9971..74b9a6c 100644
+--- a/win32/file.c
++++ b/win32/file.c
+@@ -11,6 +11,11 @@
+ #include <shlwapi.h>
+ #include "win32/file.h"
+ 
++/* -- Start of tebako patch -- */
++#include <tebako/tebako-config.h>
++#include <tebako/tebako-io.h>
++/* -- End of tebako patch -- */
++
+ #ifndef INVALID_FILE_ATTRIBUTES
+ # define INVALID_FILE_ATTRIBUTES ((DWORD)-1)
+ #endif
+@@ -589,7 +594,11 @@ rb_file_load_ok(const char *path)
+     long len;
+     wchar_t* wpath;
+ 
+-    wpath = mbstr_to_wstr(CP_UTF8, path, -1, &len);
++    /* -- Start of tebako patch -- */
++  if (tebako_file_load_ok(path)) return ret;
++    /* -- End of tebako patch -- */
++wpath = mbstr_to_wstr(CP_UTF8, path, -1, &len);
++
+     if (!wpath) return 0;
+ 
+     attr = GetFileAttributesW(wpath);

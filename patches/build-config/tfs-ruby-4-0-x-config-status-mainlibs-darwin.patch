@@ -1,0 +1,32 @@
+# tfs-ruby-4-0-x-config-status-mainlibs-darwin.patch
+#
+# Target:  config.status (pass2 (macos), generated file -- see below)
+# Applies: ruby 4.0.x (4.0.0 - 4.0.6)
+# Source:  tebako gem lib/tebako/packager/patch_buildsystem.rb PatchBuildsystem#get_config_status_patch
+#
+# Replace the MAINLIBS value in the generated config.status with the
+# tebako static library set; configure's LIBS env (for the static
+# deps) is appended to MAINLIBS after ruby's defaults.
+# NOTE: @TEBAKO_MLIBS@ is a placeholder substituted at packaging time
+# with the platform/dependency-specific library list (gem:
+# PatchLibraries.mlibs).
+# NOTE: config.status is not shipped in the ruby tarballs; this patch
+# was generated against and verified on config.status files produced
+# by a default ./configure of the claimed versions on macOS (arm64).
+# Context lines may differ with other configure flags/platforms.
+
+diff --git a/config.status b/config.status
+old mode 100755
+new mode 100644
+index 5f86fdb..99eb6a7
+--- a/config.status
++++ b/config.status
+@@ -641,7 +641,7 @@ S["EXPORT_PREFIX"]=""
+ S["COMMON_HEADERS"]=""
+ S["COMMON_MACROS"]=""
+ S["COMMON_LIBS"]=""
+-S["MAINLIBS"]="-ldl -lobjc -lpthread "
++S["MAINLIBS"]="@TEBAKO_MLIBS@"
+ S["ENABLE_SHARED"]="no"
+ S["DLDSHARED"]="$(CC) -dynamiclib"
+ S["DLDLIBS"]=""

@@ -1,0 +1,27 @@
+# tfs-ruby-3-4-x-util-c-tebako-includes.patch
+#
+# Target:  util.c (pass2 (all platforms))
+# Applies: ruby 3.4.x (3.4.1 - 3.4.2)
+# Source:  tebako gem lib/tebako/packager/pass2_patch.rb Pass2Patch#util_c_patch
+#
+# Inject the tebako memfs io headers into util.c (after the
+# !HAVE_GNU_QSORT_R block).
+# X-Redesign: modern-api
+diff --git a/util.c b/util.c
+index 2e88761..0ab6401 100644
+--- a/util.c
++++ b/util.c
+@@ -532,6 +532,13 @@ ruby_qsort(void* base, const size_t nel, const size_t size, cmpfunc_t *cmp, void
+ #endif
+ #endif /* !HAVE_GNU_QSORT_R */
+ 
++/* -- Start of tebako patch -- */
++#include <tebako/tebako-config.h>
++#include <tebako/tebako-defines.h>
++#include <tebako/tebako-io.h>
++/* -- End of tebako patch -- */
++
++
+ char *
+ ruby_strdup(const char *str)
+ {

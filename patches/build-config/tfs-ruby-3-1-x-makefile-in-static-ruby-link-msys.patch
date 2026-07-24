@@ -1,0 +1,24 @@
+# tfs-ruby-3-1-x-makefile-in-static-ruby-link-msys.patch
+#
+# Target:  template/Makefile.in (pass1 + pass2 (msys))
+# Applies: ruby 3.1.x (3.1.6)
+# Source:  tebako gem lib/tebako/packager/patch.rb TEMPLATE_MAKEFILE_IN_STATIC_RUBY_LINK_PATCH
+#
+# msys: the PROGRAM link in the generated Makefile (the one the exts.mk
+# submake links ruby.exe with) has the same static-lib ordering problem as
+# the common.mk STATIC_RUBY rule. Ruby 3.3+ links MAINLIBS+EXTLIBS,
+# 3.1/3.2 link MAINLIBS+LIBS+EXTLIBS; the gem carries both shapes, only
+# one matches per version. Applied in pass1 and pass2.
+diff --git a/template/Makefile.in b/template/Makefile.in
+index 97313af..56840d8 100644
+--- a/template/Makefile.in
++++ b/template/Makefile.in
+@@ -287,7 +287,7 @@ miniruby$(EXEEXT):
+ $(PROGRAM):
+ 		@$(RM) $@
+ 		$(ECHO) linking $@
+-		$(Q) $(PURIFY) $(CC) $(EXE_LDFLAGS) $(XLDFLAGS) $(MAINOBJ) $(EXTOBJS) $(LIBRUBYARG) $(MAINLIBS) $(LIBS) $(EXTLIBS) $(OUTFLAG)$@
++		$(Q) $(PURIFY) $(CC) $(EXE_LDFLAGS) $(XLDFLAGS) $(MAINOBJ) $(EXTOBJS) $(LIBRUBYARG) -Wl,--start-group $(MAINLIBS) $(LIBS) $(EXTLIBS) -Wl,--end-group $(OUTFLAG)$@ # tebako patched
+ 		$(Q) $(POSTLINK)
+ 
+ $(PROGRAM): @XRUBY_LIBPATHENV_WRAPPER@

@@ -1,0 +1,54 @@
+# tfs-ruby-4-0-x-dln-c-msys-dlmap.patch
+#
+# Target:  dln.c (pass2 (msys))
+# Applies: ruby 4.0.x (4.0.0 - 4.0.6)
+# Source:  tebako gem lib/tebako/packager/pass2_patch.rb Pass2Patch#dln_c_patch, patch_literals.rb DLN_C_MSYS_PATCH / DLN_C_MSYS_PATCH_PRE32
+#
+# msys: inject the tebako io headers and route dlopen of memfs paths
+# through tebako_dlmap2file (extracts the memfs-stored library to a real
+# file before rb_w32_mbstr_to_wstr).
+# X-Redesign: modern-api
+diff --git a/dln.c b/dln.c
+index d43735f..b9bea79 100644
+--- a/dln.c
++++ b/dln.c
+@@ -77,7 +77,13 @@ void *xrealloc();
+ # include <unistd.h>
+ #endif
+ 
++/* -- Start of tebako patch -- */
++#include <tebako/tebako-config.h>
++#include <tebako/tebako-io.h>
++/* -- End of tebako patch -- */
++
+ #ifndef dln_loaderror
++
+ static void
+ dln_loaderror(const char *format, ...)
+ {
+@@ -352,7 +358,24 @@ dln_open(const char *file)
+     char message[1024];
+ 
+     /* Convert the file path to wide char */
+-    WCHAR *winfile = rb_w32_mbstr_to_wstr(CP_UTF8, file, -1, NULL);
++/* -- Start of tebako patch -- */
++  char *f = NULL;
++  WCHAR *winfile = NULL;
++  if (file && within_tebako_memfs(file)) {
++    f = tebako_dlmap2file(file);
++    if (f) {
++      winfile = rb_w32_mbstr_to_wstr(CP_UTF8, f, -1, NULL);
++      free(f);
++    }
++    else {
++      goto failed;
++    }
++  }
++  else {
++    winfile = rb_w32_mbstr_to_wstr(CP_UTF8, file, -1, NULL);
++  }
++/* -- End of tebako patch -- */
++
+     if (!winfile) {
+         dln_memerror();
+     }

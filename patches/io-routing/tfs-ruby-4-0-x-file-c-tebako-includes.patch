@@ -1,0 +1,25 @@
+# tfs-ruby-4-0-x-file-c-tebako-includes.patch
+#
+# Target:  file.c (pass2 (all platforms))
+# Applies: ruby 4.0.x (4.0.0 - 4.0.6)
+# Source:  tebako gem lib/tebako/packager/pass2_patch.rb Pass2Patch#patch_map_base
+#
+# Inject the tebako memfs io headers into file.c.
+# X-Redesign: modern-api
+diff --git a/file.c b/file.c
+index 89294ea..9bab75a 100644
+--- a/file.c
++++ b/file.c
+@@ -94,6 +94,12 @@ int flock(int, int);
+ # define lstat stat
+ #endif
+ 
++/* -- Start of tebako patch -- */
++#include <tebako/tebako-config.h>
++#include <tebako/tebako-defines.h>
++#include <tebako/tebako-io.h>
++/* -- End of tebako patch -- */
++
+ /* define system APIs */
+ #ifdef _WIN32
+ # include "win32/file.h"

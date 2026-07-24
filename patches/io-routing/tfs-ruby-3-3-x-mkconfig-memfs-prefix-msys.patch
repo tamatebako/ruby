@@ -1,0 +1,35 @@
+# tfs-ruby-3-3-x-mkconfig-memfs-prefix-msys.patch
+#
+# Target:  tool/mkconfig.rb (pass2 (msys))
+# Applies: ruby 3.3.x (3.3.3 - 3.3.7)
+# Source:  tebako gem lib/tebako/packager/pass2_patch.rb Pass2Patch#tool_mkconfig_rb_patch, patch_literals.rb TOOL_MKCONFIG_RB_SUBST_MSYS
+#
+# msys variant: rewrite CONFIG["prefix"] and CONFIG["RUBY_EXEC_PREFIX"] to
+# the tebako memfs mount point (A:/__tebako_memfs__) in the generated
+# rbconfig.rb.
+# X-Redesign: modern-api
+diff --git a/tool/mkconfig.rb b/tool/mkconfig.rb
+index 55e781a..6e81f4a 100755
+--- a/tool/mkconfig.rb
++++ b/tool/mkconfig.rb
+@@ -136,7 +136,20 @@ File.foreach "config.status" do |line|
+       val = '"$(SDKROOT)"'+val if /darwin/ =~ arch
+     end
+     v = "  CONFIG[\"#{name}\"] #{eq} #{val}\n"
++# -- Start of tebako patch --
++    v_head_comp = "  CONFIG[\"prefix\"] #{eq} "
++    if v_head_comp == v[0...(v_head_comp.length)]
++      v = "#{v[0...(v_head_comp.length)]}CONFIG[\"RUBY_EXEC_PREFIX\"] = 'A:/__tebako_memfs__'
++"
++    end
++    v_head_comp = "  CONFIG[\"RUBY_EXEC_PREFIX\"] #{eq} "
++    if v_head_comp == v[0...(v_head_comp.length)]
++      v = "#{v[0...(v_head_comp.length)]}'A:/__tebako_memfs__'
++"
++    end
++# -- End of tebako patch --
+     if fast[name]
++
+       v_fast << v
+     else
+       v_others << v

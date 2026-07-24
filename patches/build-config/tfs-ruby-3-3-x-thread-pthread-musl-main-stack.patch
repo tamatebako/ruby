@@ -1,0 +1,66 @@
+# tfs-ruby-3-3-x-thread-pthread-musl-main-stack.patch
+#
+# Target:  thread_pthread.c (pass2 (linux-musl))
+# Applies: ruby 3.3.x (3.3.3 - 3.3.7)
+# Source:  tebako gem lib/tebako/packager/patch_literals.rb PatchLiterals::LINUX_MUSL_THREAD_PTHREAD_PATCH
+#
+# musl: supply get_main_stack() from /proc/self/maps (ncopa's patch via
+# https://bugs.ruby-lang.org/issues/14387#note-13; also carried by
+# docker-library/ruby alpine images). musl has no get_main_stack
+# equivalent; breaks glibc only, which does not matter here.
+diff --git a/thread_pthread.c b/thread_pthread.c
+index 305cbdb..c258189 100644
+--- a/thread_pthread.c
++++ b/thread_pthread.c
+@@ -1791,7 +1791,50 @@ size_t pthread_get_stacksize_np(pthread_t);
+ #   define MAINSTACKADDR_AVAILABLE 0
+ # endif
+ #endif
+-#if MAINSTACKADDR_AVAILABLE && !defined(get_main_stack)
++/* -- Start of tebako patch -- */
++#if defined(__linux__) && !defined(__GLIBC__) && defined(HAVE_GETRLIMIT)
++#ifndef PAGE_SIZE
++#include <unistd.h>
++#define PAGE_SIZE sysconf(_SC_PAGE_SIZE)
++#endif
++static int
++get_main_stack(void **addr, size_t *size)
++{
++    size_t start, end, limit, prevend = 0;
++    struct rlimit r;
++    FILE *f;
++    char buf[PATH_MAX+80], s[8];
++    int n;
++    STACK_GROW_DIR_DETECTION;
++    f = fopen("/proc/self/maps", "re");
++    if (!f)
++        return -1;
++    n = 0;
++    while (fgets(buf, sizeof buf, f)) {
++        n = sscanf(buf, "%zx-%zx %*s %*s %*s %*s %7s", &start, &end, s);
++        if (n >= 2) {
++            if (n == 3 && strcmp(s, "[stack]") == 0)
++                break;
++            prevend = end;
++        }
++        n = 0;
++    }
++    fclose(f);
++    if (n == 0)
++        return -1;
++    limit = 100 << 20; /* 100MB stack limit */
++    if (getrlimit(RLIMIT_STACK, &r)==0 && r.rlim_cur < limit)
++        limit = r.rlim_cur & -PAGE_SIZE;
++    if (limit > end) limit = end;
++    if (prevend < end - limit) prevend = end - limit;
++    if (start > prevend) start = prevend;
++    *addr = IS_STACK_DIR_UPPER() ? (void *)start : (void *)end;
++    *size = end - start;
++    return 0;
++}
++#else
++/* -- End of tebako patch -- */
++
+ # define get_main_stack(addr, size) get_stack(addr, size)
+ #endif
+ 

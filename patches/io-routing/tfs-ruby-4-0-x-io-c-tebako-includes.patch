@@ -1,0 +1,25 @@
+# tfs-ruby-4-0-x-io-c-tebako-includes.patch
+#
+# Target:  io.c (pass2 (linux gnu/musl, macos))
+# Applies: ruby 4.0.x (4.0.0 - 4.0.6)
+# Source:  tebako gem lib/tebako/packager/pass2_patch.rb Pass2Patch#io_c_patch
+#
+# Inject the tebako memfs io headers into io.c (non-msys).
+# X-Redesign: modern-api
+diff --git a/io.c b/io.c
+index 3d2e340..f6ee8e6 100644
+--- a/io.c
++++ b/io.c
+@@ -175,6 +175,12 @@ off_t __syscall(quad_t number, ...);
+ 
+ #define IO_MAX_BUFFER_GROWTH 8 * 1024 * 1024 // 8MB
+ 
++/* -- Start of tebako patch -- */
++#include <tebako/tebako-config.h>
++#include <tebako/tebako-defines.h>
++#include <tebako/tebako-io.h>
++/* -- End of tebako patch -- */
++
+ /* define system APIs */
+ #ifdef _WIN32
+ #undef open

@@ -1,0 +1,52 @@
+# tfs-ruby-3-2-x-main-c-tebako-main.patch
+#
+# Target:  main.c (pass2 (all platforms))
+# Applies: ruby 3.2.x (3.2.4 - 3.2.7)
+# Source:  tebako gem lib/tebako/packager/patch_main.rb PatchMain
+#
+# Hook tebako_main(argc, argv) into the ruby entry point (memfs mount +
+# package startup) and record the original working directory in
+# $tebako_original_pwd (skipped when running miniruby).
+# X-Redesign: modern-api
+diff --git a/main.c b/main.c
+index c87355e..e1fe5cf 100644
+--- a/main.c
++++ b/main.c
+@@ -30,11 +30,24 @@
+ # undef RUBY_DEBUG_ENV
+ #endif
+ 
++/* -- Start of tebako patch -- */
++#include <tebako/tebako-main.h>
++/* -- End of tebako patch -- */
++
+ static int
+ rb_main(int argc, char **argv)
++
+ {
+     RUBY_INIT_STACK;
+     ruby_init();
++/* -- Start of tebako patch -- */
++    if (!tebako_is_running_miniruby())
++    {
++        VALUE cwd = rb_str_new_cstr(tebako_original_pwd());
++        rb_gv_set("$tebako_original_pwd", cwd);
++    }
++/* -- End of tebako patch -- */
++
+     return ruby_run_node(ruby_options(argc, argv));
+ }
+ 
+@@ -60,5 +73,12 @@ main(int argc, char **argv)
+ #endif
+ 
+     ruby_sysinit(&argc, &argv);
++/* -- Start of tebako patch -- */
++    if (tebako_main(&argc, &argv) != 0) {
++        printf("Tebako intialization failed.");
++        return -1;
++    }
++/* -- End of tebako patch -- */
++
+     return rb_main(argc, argv);
+ }

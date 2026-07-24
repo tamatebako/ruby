@@ -1,0 +1,26 @@
+# tfs-ruby-4-0-3-openssl-extconf-ruby-export-msys.patch
+#
+# Target:  ext/openssl/extconf.rb (pass1 (msys))
+# Applies: ruby 4.0.3 only
+# Source:  tebako gem lib/tebako/packager/pass1_patch.rb Pass1MSysPatch::OPENSSL_EXTCONF_RB_PATCH
+#
+# msys: RUBY_EXPORT=1 shall be set for static builds but is missing in the
+# openssl extension; push -DRUBY_EXPORT=1 into $defs.
+diff --git a/ext/openssl/extconf.rb b/ext/openssl/extconf.rb
+index a897c86..a8b1a6a 100644
+--- a/ext/openssl/extconf.rb
++++ b/ext/openssl/extconf.rb
+@@ -169,8 +169,13 @@ have_func("TS_VERIFY_CTX_set0_certs(NULL, NULL)", ts_h)
+ # added in 3.5.0
+ have_func("SSL_get0_peer_signature_name(NULL, NULL)", ssl_h)
+ 
++# Start of tebako patch
++$defs.push("-DRUBY_EXPORT=1")
++# End of tebako patch
++
+ Logging::message "=== Checking done. ===\n"
+ 
++
+ # Append flags from environment variables.
+ extcflags = ENV["RUBY_OPENSSL_EXTCFLAGS"]
+ append_cflags(extcflags.split) if extcflags
