@@ -30,7 +30,10 @@ Per-line folders with YAML manifests:
   `patches.schema.yml` for every `patch-*.yaml` manifest. CI validates
   all manifests against them before use (`tools/validate_manifests`).
 - `versions.yml` — every supported ruby version with its official tarball
-  URL, sha256 (mirroring the gem's `RUBY_VERSIONS`), and major.minor line.
+  URL, sha256 (mirroring the gem's `RUBY_VERSIONS`), major.minor line, and
+  the platform `scenarios` it ships src releases for (subset of
+  `linux-gnu`/`linux-musl`/`msys`, absent means linux-gnu only; verified
+  apply-clean per version).
 
 Patches are grouped by feature family rather than by build phase; the
 `# X-Redesign: modern-api` header note still marks the io-routing family
@@ -127,8 +130,12 @@ Thin executables over the model classes in `tools/lib/tfs/`
 `Tfs::SchemaLint`, `Tfs::SourcePrep`; namespace parent `tools/lib/tfs.rb`
 wires children with `autoload`):
 
-- `tools/versions` — prints the versions.yml version list as a GitHub
-  Actions matrix document (used to generate CI lanes from the manifest).
+- `tools/versions [--scenarios]` — prints versions.yml as a GitHub Actions
+  matrix document. Default: the version list (one CI lane per version).
+  `--scenarios`: the flat (version × scenario build) release matrix — one
+  row per coherent build (`linux-gnu` unsuffixed for back-compat, musl at
+  pass 2 since only the msys GNUmakefile features are pass-sensitive, msys
+  expanded to its pass1/pass2 pair).
 - `tools/validate_manifests` — validates versions.yml and every
   `patch-*.yaml` against `schema/`; run in CI before the manifests are used.
 - `tools/lint <version>` — fetches the official tarball (sha256-verified,
@@ -163,9 +170,12 @@ wires children with `autoload`):
 
 CI: `.github/workflows/lint-patches.yml` lints every version on a matrix
 generated from versions.yml; `.github/workflows/release-src.yml` (tags
-`v*` + manual dispatch) builds `tfs-ruby-<version>-src.tar.gz` per version,
-verifies the artifact against the apply output, and publishes the tarballs
-plus a `SHA256SUMS` to the release; `.github/workflows/release-monitor.yml`
+`v*` + manual dispatch) builds the per-scenario
+`tfs-ruby-<version>-src[-<scenario>].tar.gz` assets on the versions.yml
+scenario matrix (`linux-gnu` stays the unsuffixed back-compat asset; msys
+ships `-msys-pass1`/`-msys-pass2`), verifies each artifact against the
+apply output, and publishes the tarballs plus a `SHA256SUMS` to the
+release; `.github/workflows/release-monitor.yml`
 (daily 06:17 UTC + manual dispatch) detects new official ruby releases and
 onboards each on its own lane: a clean onboard opens an
 "Onboard ruby X.Y.Z" pull request (peter-evans/create-pull-request), a

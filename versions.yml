@@ -1,79 +1,100 @@
 # Supported upstream ruby versions (URLs/sha256 mirror the tebako gem RUBY_VERSIONS).
+# scenarios: platform scenarios shipped as src release assets
+# (schema/versions.schema.yml; verified apply-clean per version).
 ---
 versions:
   3.1.6:
     url: https://cache.ruby-lang.org/pub/ruby/3.1/ruby-3.1.6.tar.gz
     sha256: 0d0dafb859e76763432571a3109d1537d976266be3083445651dc68deed25c22
     line: '3.1'
+    scenarios: [linux-gnu, linux-musl, msys]
   3.2.4:
     url: https://cache.ruby-lang.org/pub/ruby/3.2/ruby-3.2.4.tar.gz
     sha256: c72b3c5c30482dca18b0f868c9075f3f47d8168eaf626d4e682ce5b59c858692
     line: '3.2'
+    scenarios: [linux-gnu, linux-musl, msys]
   3.2.5:
     url: https://cache.ruby-lang.org/pub/ruby/3.2/ruby-3.2.5.tar.gz
     sha256: ef0610b498f60fb5cfd77b51adb3c10f4ca8ed9a17cb87c61e5bea314ac34a16
     line: '3.2'
+    scenarios: [linux-gnu, linux-musl, msys]
   3.2.6:
     url: https://cache.ruby-lang.org/pub/ruby/3.2/ruby-3.2.6.tar.gz
     sha256: d9cb65ecdf3f18669639f2638b63379ed6fbb17d93ae4e726d4eb2bf68a48370
     line: '3.2'
+    scenarios: [linux-gnu, linux-musl, msys]
   3.2.7:
     url: https://cache.ruby-lang.org/pub/ruby/3.2/ruby-3.2.7.tar.gz
     sha256: 8488fa620ff0333c16d437f2b890bba3b67f8745fdecb1472568a6114aad9741
     line: '3.2'
+    scenarios: [linux-gnu, linux-musl, msys]
   3.3.3:
     url: https://cache.ruby-lang.org/pub/ruby/3.3/ruby-3.3.3.tar.gz
     sha256: 83c05b2177ee9c335b631b29b8c077b4770166d02fa527f3a9f6a40d13f3cce2
     line: '3.3'
+    scenarios: [linux-gnu, linux-musl, msys]
   3.3.4:
     url: https://cache.ruby-lang.org/pub/ruby/3.3/ruby-3.3.4.tar.gz
     sha256: fe6a30f97d54e029768f2ddf4923699c416cdbc3a6e96db3e2d5716c7db96a34
     line: '3.3'
+    scenarios: [linux-gnu, linux-musl, msys]
   3.3.5:
     url: https://cache.ruby-lang.org/pub/ruby/3.3/ruby-3.3.5.tar.gz
     sha256: 3781a3504222c2f26cb4b9eb9c1a12dbf4944d366ce24a9ff8cf99ecbce75196
     line: '3.3'
+    scenarios: [linux-gnu, linux-musl, msys]
   3.3.6:
     url: https://cache.ruby-lang.org/pub/ruby/3.3/ruby-3.3.6.tar.gz
     sha256: 8dc48fffaf270f86f1019053f28e51e4da4cce32a36760a0603a9aee67d7fd8d
     line: '3.3'
+    scenarios: [linux-gnu, linux-musl, msys]
   3.3.7:
     url: https://cache.ruby-lang.org/pub/ruby/3.3/ruby-3.3.7.tar.gz
     sha256: 9c37c3b12288c7aec20ca121ce76845be5bb5d77662a24919651aaf1d12c8628
     line: '3.3'
+    scenarios: [linux-gnu, linux-musl, msys]
   3.4.1:
     url: https://cache.ruby-lang.org/pub/ruby/3.4/ruby-3.4.1.tar.gz
     sha256: 3d385e5d22d368b064c817a13ed8e3cc3f71a7705d7ed1bae78013c33aa7c87f
     line: '3.4'
+    scenarios: [linux-gnu, linux-musl, msys]
   3.4.2:
     url: https://cache.ruby-lang.org/pub/ruby/3.4/ruby-3.4.2.tar.gz
     sha256: 41328ac21f2bfdd7de6b3565ef4f0dd7543354d37e96f157a1552a6bd0eb364b
     line: '3.4'
+    scenarios: [linux-gnu, linux-musl, msys]
   4.0.0:
     url: https://cache.ruby-lang.org/pub/ruby/4.0/ruby-4.0.0.tar.gz
     sha256: 2e8389c8c072cb658c93a1372732d9eac84082c88b065750db1e52a5ac630271
     line: '4.0'
+    scenarios: [linux-gnu, linux-musl, msys]
   4.0.1:
     url: https://cache.ruby-lang.org/pub/ruby/4.0/ruby-4.0.1.tar.gz
     sha256: 3924be2d05db30f4e35f859bf028be85f4b7dd01714142fd823e4af5de2faf9d
     line: '4.0'
+    scenarios: [linux-gnu, linux-musl, msys]
   4.0.2:
     url: https://cache.ruby-lang.org/pub/ruby/4.0/ruby-4.0.2.tar.gz
     sha256: 51502b26b50b68df4963336ca41e368cde92c928faf91654de4c4c1791f82aac
     line: '4.0'
+    scenarios: [linux-gnu, linux-musl, msys]
   4.0.3:
     url: https://cache.ruby-lang.org/pub/ruby/4.0/ruby-4.0.3.tar.gz
     sha256: 77964acc370d5c8375b9502e5ba6c13c03ef91ab9eb9f521c84fb42b9c9a6b0f
     line: '4.0'
+    scenarios: [linux-gnu, linux-musl, msys]
   4.0.4:
     url: https://cache.ruby-lang.org/pub/ruby/4.0/ruby-4.0.4.tar.gz
     sha256: f35f6edfa3dabb3f723f9d0cf1906c6512ae77f4e412ab1e68cc6e91d230fa80
     line: '4.0'
+    scenarios: [linux-gnu, linux-musl, msys]
   4.0.5:
     url: https://cache.ruby-lang.org/pub/ruby/4.0/ruby-4.0.5.tar.gz
     sha256: 7d6149079a63f8ae1d326c9fa65c6019ba2dc3155eae7b39159817911c88958e
     line: '4.0'
+    scenarios: [linux-gnu, linux-musl, msys]
   4.0.6:
     url: https://cache.ruby-lang.org/pub/ruby/4.0/ruby-4.0.6.tar.gz
     sha256: 837d299e8f7ddf2be31a229a7a7e019d354979825117989acb3b32b1a9be262a
     line: '4.0'
+    scenarios: [linux-gnu, linux-musl, msys]
