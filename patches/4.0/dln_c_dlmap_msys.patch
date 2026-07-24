@@ -3,21 +3,43 @@
 # Target:  dln.c (pass2 (msys))
 # Source:  tebako gem lib/tebako/packager/pass2_patch.rb Pass2Patch#dln_c_patch, patch_literals.rb DLN_C_MSYS_PATCH / DLN_C_MSYS_PATCH_PRE32
 #
-# msys: inject the tebako io headers and route dlopen of memfs paths
-# through tebako_dlmap2file (extracts the memfs-stored library to a real
-# file before rb_w32_mbstr_to_wstr).
+# msys: route dlopen of memfs paths through the libtfs c_api: a memfs file
+# is first mapped to a host file (tebako_fs_dlmap2file), then converted with
+# rb_w32_mbstr_to_wstr and loaded; host paths convert as-is.
+# libtfs c_api extension (requested): tebako_fs_dlmap2file -- extract a
+# memfs file to a host path, the modern counterpart of the legacy
+# tebako_dlmap2file.
 # X-Redesign: modern-api
 diff --git a/dln.c b/dln.c
 index d43735f..b9bea79 100644
 --- a/dln.c
 +++ b/dln.c
-@@ -77,7 +77,13 @@ void *xrealloc();
+@@ -77,7 +77,32 @@ void *xrealloc();
  # include <unistd.h>
  #endif
  
 +/* -- Start of tebako patch -- */
-+#include <tebako/tebako-config.h>
-+#include <tebako/tebako-io.h>
++#include <tebako/tebako-main.h> /* tebako_mount_point(): the compiled-in fs_mount_point */
++#include <string.h>               /* strlen/strncmp/memset/memcpy used below */
++
++/* Route check: is path inside the memfs mount? (mount-point prefix check vs
++   the compiled-in fs_mount_point; the memfs is read-only -- writes/cwd go to
++   the host fs unchanged) */
++static int
++tfs_memfs_path_p(const char *path)
++{
++    const char *mount = tebako_mount_point();
++    size_t mount_len;
++    if (path == NULL || mount == NULL) return 0;
++    mount_len = strlen(mount);
++    return strncmp(path, mount, mount_len) == 0;
++}
++
++/* libtfs c_api extension (requested): tebako_fs_dlmap2file -- extract a
++   memfs file to a host path (the modern counterpart of the legacy
++   tebako_fs_dlmap2file); declared here so this translation unit stays
++   C99-clean meanwhile */
++char *tebako_fs_dlmap2file(const char *path);
 +/* -- End of tebako patch -- */
 +
  #ifndef dln_loaderror
@@ -25,7 +47,7 @@ index d43735f..b9bea79 100644
  static void
  dln_loaderror(const char *format, ...)
  {
-@@ -352,7 +358,24 @@ dln_open(const char *file)
+@@ -352,7 +377,24 @@ dln_open(const char *file)
      char message[1024];
  
      /* Convert the file path to wide char */
@@ -33,8 +55,8 @@ index d43735f..b9bea79 100644
 +/* -- Start of tebako patch -- */
 +  char *f = NULL;
 +  WCHAR *winfile = NULL;
-+  if (file && within_tebako_memfs(file)) {
-+    f = tebako_dlmap2file(file);
++  if (file && tfs_memfs_path_p(file)) {
++    f = tebako_fs_dlmap2file(file);
 +    if (f) {
 +      winfile = rb_w32_mbstr_to_wstr(CP_UTF8, f, -1, NULL);
 +      free(f);

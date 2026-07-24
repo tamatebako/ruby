@@ -91,9 +91,5 @@ patches:
     file: mkconfig_memfs_prefix_msys.patch
   - feature: ruby_c_memfs_path_msys
     file: ruby_c_memfs_path_msys.patch
-  - feature: util_c_tebako_includes
-    file: util_c_tebako_includes.patch
   - feature: win32_file_c_tebako_load_ok_msys
     file: win32_file_c_tebako_load_ok_msys.patch
-  - feature: win32_getcwd_shim_msys
-    file: win32_getcwd_shim_msys.patch

@@ -3,33 +3,64 @@
 # Target:  win32/file.c (pass2 (msys))
 # Source:  tebako gem lib/tebako/packager/pass2msys_patch.rb WIN32_FILE_C_MSYS_PATCHES
 #
-# msys: inject the tebako io headers and return early from the UTF-8 ->
-# wide-char path conversion when the file is loadable from the memfs
-# (tebako_file_load_ok).
+# msys: return early from the UTF-8 -> wide-char path conversion when the
+# file is loadable from the memfs. The check is stat-based: a mount-point
+# prefix check vs the compiled-in fs_mount_point (tebako_mount_point())
+# plus tebako_fs_stat (the memfs is read-only; directories are not
+# loadable). Non-mount paths pass to the host fs unchanged.
 # X-Redesign: modern-api
 diff --git a/win32/file.c b/win32/file.c
 index 26b9971..74b9a6c 100644
 --- a/win32/file.c
 +++ b/win32/file.c
-@@ -11,6 +11,11 @@
+@@ -11,6 +11,40 @@
  #include <shlwapi.h>
  #include "win32/file.h"
  
 +/* -- Start of tebako patch -- */
-+#include <tebako/tebako-config.h>
-+#include <tebako/tebako-io.h>
++#include <tebako/tebako-main.h> /* tebako_mount_point(): the compiled-in fs_mount_point */
++#include <string.h>               /* strlen/strncmp/memset/memcpy used below */
++
++/* ruby/win32.h maps 'stat' onto stati128; the libtfs C API fills the CRT
++   struct stat, so keep the plain name visible inside this block */
++#pragma push_macro("stat")
++#undef stat
++#include <tebako/fs/c_api.h>     /* modern libtfs C API (tebako_fs_*) */
++
++/* Route check: is path inside the memfs mount? (mount-point prefix check vs
++   the compiled-in fs_mount_point; the memfs is read-only -- writes/cwd go to
++   the host fs unchanged) */
++static int
++tfs_memfs_path_p(const char *path)
++{
++    const char *mount = tebako_mount_point();
++    size_t mount_len;
++    if (path == NULL || mount == NULL) return 0;
++    mount_len = strlen(mount);
++    return strncmp(path, mount, mount_len) == 0;
++}
++
++/* stat-based "in mount?" check: the file is loadable from the read-only
++   memfs when it stats and is not a directory */
++static int
++tfs_file_loadable_p(const char *path)
++{
++    struct stat st;
++    return tfs_memfs_path_p(path) && tebako_fs_stat(path, &st) == 0 && !S_ISDIR(st.st_mode);
++}
++#pragma pop_macro("stat")
 +/* -- End of tebako patch -- */
 +
  #ifndef INVALID_FILE_ATTRIBUTES
  # define INVALID_FILE_ATTRIBUTES ((DWORD)-1)
  #endif
-@@ -589,7 +594,11 @@ rb_file_load_ok(const char *path)
+@@ -589,7 +623,11 @@ rb_file_load_ok(const char *path)
      long len;
      wchar_t* wpath;
  
 -    wpath = mbstr_to_wstr(CP_UTF8, path, -1, &len);
 +    /* -- Start of tebako patch -- */
-+  if (tebako_file_load_ok(path)) return ret;
++  if (tfs_file_loadable_p(path)) return ret;
 +    /* -- End of tebako patch -- */
 +wpath = mbstr_to_wstr(CP_UTF8, path, -1, &len);
 +

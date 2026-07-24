@@ -3,38 +3,135 @@
 # Target:  io.c (pass2 (msys))
 # Source:  tebako gem lib/tebako/packager/pass2msys_patch.rb Pass2MSysPatch#io_c_patch (IO_C_MSYS_BASE_PATCH, IO_C_MSYS_PATCH[_PRE_32])
 #
-# msys: inject the tebako io headers, route open through tebako_open, and
+# msys: route ruby's io into the tebako memfs via the modern libtfs C API
+# (<tebako/fs/c_api.h>, tebako_fs_*) at the rb_w32_* layer, route open
+# through tfs_open (memfs paths under the compiled-in fs_mount_point go to
+# the memfs, everything else to the host fs -- the memfs is read-only), and
 # treat tebako memfs file descriptors as already-readable in rb_io_wait
-# (skip the cancelable wait).
+# (skip the cancelable wait; tebako_fd_is_embedded is the c_api FD
+# introspection).
 # X-Redesign: modern-api
 diff --git a/io.c b/io.c
 index 1bfd39d..54d88d9 100644
 --- a/io.c
 +++ b/io.c
-@@ -174,10 +174,16 @@ off_t __syscall(quad_t number, ...);
+@@ -174,10 +174,109 @@ off_t __syscall(quad_t number, ...);
  #define IO_RBUF_CAPA_FOR(fptr) (NEED_READCONV(fptr) ? IO_CBUF_CAPA_MIN : IO_RBUF_CAPA_MIN)
  #define IO_WBUF_CAPA_MIN  8192
  
 +/* -- Start of tebako patch -- */
-+#include <tebako/tebako-config.h>
-+#include <tebako/tebako-defines.h>
-+#include <tebako/tebako-io.h>
++#include <tebako/tebako-main.h> /* tebako_mount_point(): the compiled-in fs_mount_point */
++#include <string.h>               /* strlen/strncmp/memset/memcpy used below */
++
++/* ruby/win32.h maps 'stat' onto stati128; the libtfs C API fills the CRT
++   struct stat, so keep the plain name visible inside this block */
++#pragma push_macro("stat")
++#undef stat
++#include <tebako/fs/c_api.h>     /* modern libtfs C API (tebako_fs_*) */
++
++/* Route check: is path inside the memfs mount? (mount-point prefix check vs
++   the compiled-in fs_mount_point; the memfs is read-only -- writes/cwd go to
++   the host fs unchanged) */
++static int
++tfs_memfs_path_p(const char *path)
++{
++    const char *mount = tebako_mount_point();
++    size_t mount_len;
++    if (path == NULL || mount == NULL) return 0;
++    mount_len = strlen(mount);
++    return strncmp(path, mount, mount_len) == 0;
++}
++
++static int
++tfs_open(const char *path, int flags, mode_t mode)
++{
++    if (tfs_memfs_path_p(path) && (flags & (O_WRONLY | O_RDWR | O_CREAT | O_TRUNC)) == 0) {
++        return tebako_fs_open(path, flags);
++    }
++    return rb_w32_uopen(path, flags, mode);
++}
++
++static ssize_t
++tfs_read(int fd, void *buf, size_t nbyte)
++{
++    if (tebako_fd_is_embedded(fd)) {
++        return tebako_fs_read(fd, buf, nbyte);
++    }
++    return rb_w32_read(fd, buf, nbyte);
++}
++
++static off_t
++tfs_lseek(int fd, off_t offset, int whence)
++{
++    if (tebako_fd_is_embedded(fd)) {
++        return tebako_fs_lseek(fd, offset, whence);
++    }
++    return rb_w32_lseek(fd, offset, whence);
++}
++
++static int
++tfs_close(int fd)
++{
++    if (tebako_fd_is_embedded(fd)) {
++        return tebako_fs_close(fd);
++    }
++    return rb_w32_close(fd);
++}
++
++/* tebako_fs_fstat fills a CRT struct stat; convert to ruby's stati128 */
++static void
++tfs_stat_to_stati128(const struct stat *i, struct stati128 *o)
++{
++    o->st_dev = i->st_dev;
++    o->st_ino = i->st_ino;
++    o->st_inohigh = 0;
++    o->st_mode = i->st_mode;
++    o->st_nlink = i->st_nlink;
++    o->st_uid = i->st_uid;
++    o->st_gid = i->st_gid;
++    o->st_rdev = i->st_rdev;
++    o->st_size = i->st_size;
++    o->st_atime = i->st_atime;
++    o->st_atimensec = 0;
++    o->st_mtime = i->st_mtime;
++    o->st_mtimensec = 0;
++    o->st_ctime = i->st_ctime;
++    o->st_ctimensec = 0;
++}
++
++static int
++tfs_fstati128(int fd, struct stati128 *st)
++{
++    if (tebako_fd_is_embedded(fd)) {
++        struct stat stb;
++        int ret = tebako_fs_fstat(fd, &stb);
++        if (ret == 0) tfs_stat_to_stati128(&stb, st);
++        return ret;
++    }
++    return rb_w32_fstati128(fd, st);
++}
++#pragma pop_macro("stat")
++
++#define rb_w32_read(...) tfs_read(__VA_ARGS__)
++#define rb_w32_lseek(...) tfs_lseek(__VA_ARGS__)
++#define rb_w32_close(...) tfs_close(__VA_ARGS__)
++#define rb_w32_fstati128(...) tfs_fstati128(__VA_ARGS__)
 +/* -- End of tebako patch -- */
 +
  /* define system APIs */
  #ifdef _WIN32
  #undef open
 -#define open	rb_w32_uopen
-+#define open(p, f, m) tebako_open(3, (p), (f), (m))
++#define open(p, f, m) tfs_open((p), (f), (m))
  #undef rename
  #define rename(f, t)	rb_w32_urename((f), (t))
  #endif
-@@ -500,7 +506,8 @@ rb_cloexec_fcntl_dupfd(int fd, int minfd)
+@@ -500,7 +599,8 @@ rb_cloexec_fcntl_dupfd(int fd, int minfd)
  
  #if defined(_WIN32)
  #define WAIT_FD_IN_WIN32(fptr) \
 -    (rb_w32_io_cancelable_p((fptr)->fd) ? Qnil : rb_io_wait(fptr->self, RB_INT2NUM(RUBY_IO_READABLE), Qnil))
-+    ((is_tebako_file_descriptor((fptr)->fd) || rb_w32_io_cancelable_p((fptr)->fd)) ? \
++    ((tebako_fd_is_embedded((fptr)->fd) || rb_w32_io_cancelable_p((fptr)->fd)) ? \
 +Qnil : rb_io_wait(fptr->self, RB_INT2NUM(RUBY_IO_READABLE), Qnil))
  #else
  #define WAIT_FD_IN_WIN32(fptr)
