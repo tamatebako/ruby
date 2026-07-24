@@ -126,10 +126,18 @@ module Tfs
         return false
       end
 
-      _out, err, status = Open3.capture3("git", "apply", *extra_args, patch.path, chdir: tree)
+      _out, err, status = Open3.capture3(apply_env(tree), "git", "apply", *extra_args, patch.path, chdir: tree)
       return true if status.success?
 
       raise ApplyError, "FAIL #{version_name} #{patch.name}\n#{err.strip}"
+    end
+
+    # git apply run inside an enclosing git work tree (CI builds under
+    # $GITHUB_WORKSPACE) resolves patch paths against that repository's
+    # root and silently SKIPS every target -- exit 0, tree untouched.
+    # Ceiling discovery at the output directory so git never sees a repo.
+    def apply_env(tree)
+      { "GIT_CEILING_DIRECTORIES" => File.realpath(File.dirname(tree)) }
     end
 
     def defer(version_name, patch)

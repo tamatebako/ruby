@@ -97,6 +97,20 @@ RSpec.describe Tfs::SourcePrep do
     end
   end
 
+  it "applies patches even when the output tree sits inside a git work tree" do
+    Dir.mktmpdir do |dir|
+      # CI checks the workflow repo out at $GITHUB_WORKSPACE and builds under
+      # it: git apply then resolves patch paths against that enclosing
+      # repository root and silently SKIPS every target (exit 0, pristine
+      # tree). The apply must be walled off from any enclosing work tree.
+      system("git", "init", "-q", dir) || raise("git init failed")
+      prep = described_class.new(versions: versions, selection: selection, cache_dir: seeded_cache(dir))
+      tree = prep.prepare("9.9.9", File.join(dir, "out"), platform: "linux-gnu", pass: 2)
+
+      expect(File.read(File.join(tree, "hello.txt"))).to include("(tebako patched)")
+    end
+  end
+
   it "rejects a cached tarball whose sha256 does not match the manifest" do
     Dir.mktmpdir do |dir|
       cache = File.join(dir, "cache")
