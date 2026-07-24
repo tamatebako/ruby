@@ -1,0 +1,4 @@
+# selection fixture (content not applied)
+diff --git a/cygwin/GNUmakefile.in b/cygwin/GNUmakefile.in
+--- a/cygwin/GNUmakefile.in
++++ b/cygwin/GNUmakefile.in

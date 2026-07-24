@@ -1,0 +1,80 @@
+name: release-src
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+    inputs:
+      release_tag:
+        description: Tag to publish the source tarballs to
+        required: true
+        default: v0.0.0
+
+jobs:
+  versions:
+    name: emit version matrix
+    runs-on: ubuntu-latest
+    outputs:
+      matrix: ${{ steps.emit.outputs.matrix }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: ruby/setup-ruby@v1
+        with:
+          ruby-version: "3.2"
+      - id: emit
+        run: echo "matrix=$(tools/versions)" >> "$GITHUB_OUTPUT"
+
+  build:
+    name: tfs-ruby-${{ matrix.version }}-src
+    needs: versions
+    strategy:
+      fail-fast: false
+      matrix: ${{ fromJSON(needs.versions.outputs.matrix) }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: ruby/setup-ruby@v1
+        with:
+          ruby-version: "3.2"
+      - name: apply patches
+        run: tools/apply "${{ matrix.version }}" "$PWD/build"
+      - name: package
+        working-directory: build
+        run: |
+          tar -czf "tfs-ruby-${{ matrix.version }}-src.tar.gz" "tfs-ruby-${{ matrix.version }}-src"
+          sha256sum "tfs-ruby-${{ matrix.version }}-src.tar.gz" > "tfs-ruby-${{ matrix.version }}-src.tar.gz.sha256"
+      - name: extract-verify
+        working-directory: build
+        run: |
+          mkdir verify
+          tar -xzf "tfs-ruby-${{ matrix.version }}-src.tar.gz" -C verify
+          diff -qr "tfs-ruby-${{ matrix.version }}-src" "verify/tfs-ruby-${{ matrix.version }}-src"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: tfs-ruby-${{ matrix.version }}-src
+          path: build/tfs-ruby-${{ matrix.version }}-src.tar.gz*
+          retention-days: 1
+
+  publish:
+    name: publish release
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: tfs-ruby-*-src
+          path: dist
+          merge-multiple: true
+      - name: SHA256SUMS
+        working-directory: dist
+        run: |
+          cat *.sha256 > SHA256SUMS
+          rm -f *.sha256
+      - uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ github.event_name == 'push' && github.ref_name || inputs.release_tag }}
+          files: |
+            dist/*.tar.gz
+            dist/SHA256SUMS

@@ -1,0 +1,19 @@
+# Fixture manifest for specs. URLs deliberately point at a dead local
+# address: any network attempt in a spec fails loudly and instantly.
+versions:
+  3.3.3:
+    url: http://127.0.0.1:1/ruby-3.3.3.tar.gz
+    sha256: "0000000000000000000000000000000000000000000000000000000000000001"
+    line: "3.3"
+  3.3.7:
+    url: http://127.0.0.1:1/ruby-3.3.7.tar.gz
+    sha256: "0000000000000000000000000000000000000000000000000000000000000002"
+    line: "3.3"
+  3.4.1:
+    url: http://127.0.0.1:1/ruby-3.4.1.tar.gz
+    sha256: "0000000000000000000000000000000000000000000000000000000000000003"
+    line: "3.4"
+  9.9.9:
+    url: http://127.0.0.1:1/ruby-9.9.9.tar.gz
+    sha256: "10489d1a3f18a6d5920f7642518be6633b507b87e8de5cafd87369002cf2bb34"
+    line: "9.9"

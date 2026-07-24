@@ -1,0 +1,4 @@
+# selection fixture (content not applied)
+diff --git a/thread_pthread.c b/thread_pthread.c
+--- a/thread_pthread.c
++++ b/thread_pthread.c

@@ -1,0 +1,35 @@
+name: lint-patches
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  versions:
+    name: emit version matrix
+    runs-on: ubuntu-latest
+    outputs:
+      matrix: ${{ steps.emit.outputs.matrix }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: ruby/setup-ruby@v1
+        with:
+          ruby-version: "3.2"
+      - id: emit
+        run: echo "matrix=$(tools/versions)" >> "$GITHUB_OUTPUT"
+
+  lint:
+    name: lint ${{ matrix.version }}
+    needs: versions
+    strategy:
+      fail-fast: false
+      matrix: ${{ fromJSON(needs.versions.outputs.matrix) }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: ruby/setup-ruby@v1
+        with:
+          ruby-version: "3.2"
+      - name: git apply --check every selected patch
+        run: tools/lint "${{ matrix.version }}"

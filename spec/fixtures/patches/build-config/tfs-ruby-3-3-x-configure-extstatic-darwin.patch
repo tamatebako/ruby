@@ -1,0 +1,4 @@
+# selection fixture (content not applied)
+diff --git a/configure b/configure
+--- a/configure
++++ b/configure

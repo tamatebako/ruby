@@ -1,0 +1,4 @@
+# selection fixture (content not applied)
+diff --git a/dir.c b/dir.c
+--- a/dir.c
++++ b/dir.c
