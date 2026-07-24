@@ -3,20 +3,113 @@
 # Target:  io.c (pass2 (linux gnu/musl, macos))
 # Source:  tebako gem lib/tebako/packager/pass2_patch.rb Pass2Patch#io_c_patch
 #
-# Inject the tebako memfs io headers into io.c (non-msys).
+# Route ruby's io into the tebako memfs via the modern libtfs C API
+# (<tebako/fs/c_api.h>, tebako_fs_*): paths under the compiled-in
+# fs_mount_point (tebako_mount_point()) go to the memfs, everything else to
+# the host fs (the memfs is read-only -- writes/cwd stay on the host).
+# File-descriptor calls dispatch on tebako_fd_is_embedded() (the c_api FD
+# introspection), so host pipes/sockets keep their native behavior.
+# libtfs c_api extension (requested): tebako_fs_pread -- a positional read
+# that does not move the file position (IO#pread on memfs files).
 # X-Redesign: modern-api
 diff --git a/io.c b/io.c
 index 1bfd39d..9e3fb97 100644
 --- a/io.c
 +++ b/io.c
-@@ -174,6 +174,12 @@ off_t __syscall(quad_t number, ...);
+@@ -174,6 +174,98 @@ off_t __syscall(quad_t number, ...);
  #define IO_RBUF_CAPA_FOR(fptr) (NEED_READCONV(fptr) ? IO_CBUF_CAPA_MIN : IO_RBUF_CAPA_MIN)
  #define IO_WBUF_CAPA_MIN  8192
  
 +/* -- Start of tebako patch -- */
-+#include <tebako/tebako-config.h>
-+#include <tebako/tebako-defines.h>
-+#include <tebako/tebako-io.h>
++#include <tebako/tebako-main.h> /* tebako_mount_point(): the compiled-in fs_mount_point */
++#include <tebako/fs/c_api.h>     /* modern libtfs C API (tebako_fs_*) */
++
++/* Route check: is path inside the memfs mount? (mount-point prefix check vs
++   the compiled-in fs_mount_point; the memfs is read-only -- writes/cwd go to
++   the host fs unchanged) */
++static int
++tfs_memfs_path_p(const char *path)
++{
++    const char *mount = tebako_mount_point();
++    size_t mount_len;
++    if (path == NULL || mount == NULL) return 0;
++    mount_len = strlen(mount);
++    return strncmp(path, mount, mount_len) == 0;
++}
++
++static int
++tfs_open(const char *path, int flags, ...)
++{
++    va_list ap;
++    mode_t mode = 0;
++
++    if (tfs_memfs_path_p(path) && (flags & (O_WRONLY | O_RDWR | O_CREAT | O_TRUNC)) == 0) {
++        return tebako_fs_open(path, flags);
++    }
++    va_start(ap, flags);
++    if (flags & O_CREAT) {
++        mode = (mode_t) va_arg(ap, int);
++    }
++    va_end(ap);
++    return open(path, flags, mode);
++}
++
++static ssize_t
++tfs_read(int fd, void *buf, size_t nbyte)
++{
++    if (tebako_fd_is_embedded(fd)) {
++        return tebako_fs_read(fd, buf, nbyte);
++    }
++    return read(fd, buf, nbyte);
++}
++
++/* libtfs c_api extension (requested): tebako_fs_pread -- a positional read
++   that does not move the file position; declared here so this translation
++   unit stays C99-clean meanwhile */
++ssize_t tebako_fs_pread(int fd, void *buf, size_t nbyte, off_t offset);
++
++static ssize_t
++tfs_pread(int fd, void *buf, size_t nbyte, off_t offset)
++{
++    if (tebako_fd_is_embedded(fd)) {
++        return tebako_fs_pread(fd, buf, nbyte, offset);
++    }
++    return pread(fd, buf, nbyte, offset);
++}
++
++static off_t
++tfs_lseek(int fd, off_t offset, int whence)
++{
++    if (tebako_fd_is_embedded(fd)) {
++        return tebako_fs_lseek(fd, offset, whence);
++    }
++    return lseek(fd, offset, whence);
++}
++
++static int
++tfs_close(int fd)
++{
++    if (tebako_fd_is_embedded(fd)) {
++        return tebako_fs_close(fd);
++    }
++    return close(fd);
++}
++
++static int
++tfs_fstat(int fd, struct stat *st)
++{
++    if (tebako_fd_is_embedded(fd)) {
++        return tebako_fs_fstat(fd, st);
++    }
++    return fstat(fd, st);
++}
++
++#define open(...) tfs_open(__VA_ARGS__)
++#define read(...) tfs_read(__VA_ARGS__)
++#define pread(...) tfs_pread(__VA_ARGS__)
++#define lseek(...) tfs_lseek(__VA_ARGS__)
++#define close(...) tfs_close(__VA_ARGS__)
++#define fstat(...) tfs_fstat(__VA_ARGS__)
 +/* -- End of tebako patch -- */
 +
  /* define system APIs */

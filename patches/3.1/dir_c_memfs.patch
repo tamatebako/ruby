@@ -3,71 +3,214 @@
 # Target:  dir.c (pass2 (linux gnu/musl, macos))
 # Source:  tebako gem lib/tebako/packager/pass2_patch.rb Pass2Patch#dir_c_patch, patch_literals.rb DIR_C_BASE_PATCH
 #
-# Inject the tebako memfs io headers and compensate ruby's incorrect
-# processing of (f)getattrlist returning ENOTSUP on the memfs: skip the
-# getattrlist / case-sensitivity fast paths for paths outside the memfs
-# (need_normalization handles ENOTSUP correctly and is intentionally not
-# patched).
+# Route ruby's directory/stat io into the tebako memfs via the modern libtfs
+# C API (<tebako/fs/c_api.h>, tebako_fs_*): paths under the compiled-in
+# fs_mount_point (tebako_mount_point()) go to the memfs, everything else to
+# the host fs (the memfs is read-only -- writes/cwd stay on the host).
+# USE_OPENDIR_AT is forced to 0 so glob takes the routed plain opendir/stat/
+# lstat paths (the modern c_api has no openat/fstatat/fdopendir
+# counterparts), and ruby's incorrect processing of (f)getattrlist returning
+# ENOTSUP on the memfs is compensated by skipping the getattrlist /
+# case-sensitivity fast paths for memfs paths (need_normalization handles
+# ENOTSUP correctly and is intentionally not patched).
+# libtfs c_api extensions (requested): tebako_fs_dir_is_embedded,
+# tebako_fs_rewinddir, tebako_fs_telldir, tebako_fs_seekdir -- the dir-handle
+# counterparts of the fd introspection/positioning used for the dispatch.
 # X-Redesign: modern-api
 diff --git a/dir.c b/dir.c
 index 1b65190..8e1442a 100644
 --- a/dir.c
 +++ b/dir.c
-@@ -81,6 +81,12 @@ char *strchr(char*,char);
+@@ -81,6 +81,147 @@ char *strchr(char*,char);
  #define USE_NAME_ON_FS_BY_FNMATCH 2	/* select the matching
  					 * basename by fnmatch */
  
 +/* -- Start of tebako patch -- */
-+#include <tebako/tebako-config.h>
-+#include <tebako/tebako-defines.h>
-+#include <tebako/tebako-io.h>
++#include <tebako/tebako-main.h> /* tebako_mount_point(): the compiled-in fs_mount_point */
++#include <tebako/fs/c_api.h>     /* modern libtfs C API (tebako_fs_*) */
++
++/* Route check: is path inside the memfs mount? (mount-point prefix check vs
++   the compiled-in fs_mount_point; the memfs is read-only -- writes/cwd go to
++   the host fs unchanged) */
++static int
++tfs_memfs_path_p(const char *path)
++{
++    const char *mount = tebako_mount_point();
++    size_t mount_len;
++    if (path == NULL || mount == NULL) return 0;
++    mount_len = strlen(mount);
++    return strncmp(path, mount, mount_len) == 0;
++}
++
++static int
++tfs_stat(const char *path, struct stat *st)
++{
++    if (tfs_memfs_path_p(path)) return tebako_fs_stat(path, st);
++    return stat(path, st);
++}
++
++/* the memfs holds regular files/directories only (no symlink notion in the
++   c_api): stat serves as lstat */
++static int
++tfs_lstat(const char *path, struct stat *st)
++{
++    if (tfs_memfs_path_p(path)) return tebako_fs_stat(path, st);
++    return lstat(path, st);
++}
++
++/* libtfs c_api extensions (requested): the dir-handle counterparts of the fd
++   introspection/positioning -- they land with the modern-API dir completion;
++   declared here so this translation unit stays C99-clean meanwhile */
++int tebako_fs_dir_is_embedded(tebako_dir_t dir);
++void tebako_fs_rewinddir(tebako_dir_t dir);
++long tebako_fs_telldir(tebako_dir_t dir);
++void tebako_fs_seekdir(tebako_dir_t dir, long loc);
++
++static DIR *
++tfs_opendir(const char *path)
++{
++    tebako_dir_t tdir;
++    if (!tfs_memfs_path_p(path)) return opendir(path);
++    tdir = tebako_fs_opendir(path);
++    return tdir == NULL ? NULL : (DIR *) tdir;
++}
++
++/* per-thread adaptation buffer: tebako_c_dirent -> struct dirent */
++static __thread struct dirent tfs_dirent;
++
++static struct dirent *
++tfs_readdir(DIR *dirp)
++{
++    struct tebako_c_dirent *entry;
++    size_t namlen;
++    if (!tebako_fs_dir_is_embedded((tebako_dir_t) dirp)) return readdir(dirp);
++    entry = tebako_fs_readdir((tebako_dir_t) dirp);
++    if (entry == NULL) return NULL;
++    memset(&tfs_dirent, 0, sizeof(tfs_dirent));
++    namlen = strlen(entry->d_name);
++    if (namlen >= sizeof(tfs_dirent.d_name)) namlen = sizeof(tfs_dirent.d_name) - 1;
++    memcpy(tfs_dirent.d_name, entry->d_name, namlen);
++    tfs_dirent.d_name[namlen] = '\0';
++#ifdef DT_UNKNOWN
++    tfs_dirent.d_type = entry->d_type;
++#endif
++    return &tfs_dirent;
++}
++
++static int
++tfs_closedir(DIR *dirp)
++{
++    if (tebako_fs_dir_is_embedded((tebako_dir_t) dirp)) {
++        return tebako_fs_closedir((tebako_dir_t) dirp);
++    }
++    return closedir(dirp);
++}
++
++static void
++tfs_rewinddir(DIR *dirp)
++{
++    if (tebako_fs_dir_is_embedded((tebako_dir_t) dirp)) {
++        tebako_fs_rewinddir((tebako_dir_t) dirp);
++        return;
++    }
++    rewinddir(dirp);
++}
++
++static long
++tfs_telldir(DIR *dirp)
++{
++    if (tebako_fs_dir_is_embedded((tebako_dir_t) dirp)) {
++        return tebako_fs_telldir((tebako_dir_t) dirp);
++    }
++    return telldir(dirp);
++}
++
++static void
++tfs_seekdir(DIR *dirp, long loc)
++{
++    if (tebako_fs_dir_is_embedded((tebako_dir_t) dirp)) {
++        tebako_fs_seekdir((tebako_dir_t) dirp, loc);
++        return;
++    }
++    seekdir(dirp, loc);
++}
++
++/* memfs directories have no host fd: dirfd fails ENOTSUP (need_normalization
++   treats the resulting fgetattrlist failure like the legacy ENOTSUP case) */
++static int
++tfs_dirfd(DIR *dirp)
++{
++    if (tebako_fs_dir_is_embedded((tebako_dir_t) dirp)) {
++        errno = ENOTSUP;
++        return -1;
++    }
++    return dirfd(dirp);
++}
++
++/* glob through the plain opendir/stat/lstat paths: the modern c_api has no
++   openat/fstatat/fdopendir counterparts, and the plain paths are routed */
++#undef USE_OPENDIR_AT
++#define USE_OPENDIR_AT 0
++
++#define stat(...) tfs_stat(__VA_ARGS__)
++#define lstat(...) tfs_lstat(__VA_ARGS__)
++#define opendir(...) tfs_opendir(__VA_ARGS__)
++#define readdir(...) tfs_readdir(__VA_ARGS__)
++#define closedir(...) tfs_closedir(__VA_ARGS__)
++#define rewinddir(...) tfs_rewinddir(__VA_ARGS__)
++#define telldir(...) tfs_telldir(__VA_ARGS__)
++#define seekdir(...) tfs_seekdir(__VA_ARGS__)
++#ifdef dirfd
++#undef dirfd
++#endif
++#define dirfd(...) tfs_dirfd(__VA_ARGS__)
 +/* -- End of tebako patch -- */
 +
  #ifdef HAVE_GETATTRLIST
  # define USE_NAME_ON_FS USE_NAME_ON_FS_REAL_BASENAME
  # define RUP32(size) ((size)+3/4)
-@@ -550,7 +556,7 @@ dir_initialize(rb_execution_context_t *ec, VALUE dir, VALUE dirname, VALUE enc)
+@@ -550,7 +691,7 @@ dir_initialize(rb_execution_context_t *ec, VALUE dir, VALUE dirname, VALUE enc)
  	    dp->dir = opendir_without_gvl(path);
  	}
  #ifdef HAVE_GETATTRLIST
 -	else if (e == EIO) {
-+	else if (e == EIO /* tebako patch */ && !within_tebako_memfs(path)) {
++	else if (e == EIO /* tebako patch */ && !tfs_memfs_path_p(path)) {
  	    u_int32_t attrbuf[1];
  	    struct attrlist al = {ATTR_BIT_MAP_COUNT, 0};
  	    if (getattrlist(path, &al, attrbuf, sizeof(attrbuf), FSOPT_NOFOLLOW) == 0) {
-@@ -2289,7 +2295,8 @@ glob_helper(
+@@ -2289,7 +2430,8 @@ glob_helper(
  	    break;
  	  case ALPHA:
  #if USE_NAME_ON_FS == USE_NAME_ON_FS_REAL_BASENAME
 -	    plain = 1;
-+      /* tebako patch */ if (!within_tebako_memfs(path)) plain = 1; else magical = 1;
++      /* tebako patch */ if (!tfs_memfs_path_p(path)) plain = 1; else magical = 1;
 +
  #else
  	    magical = 1;
  #endif
-@@ -2403,7 +2410,7 @@ glob_helper(
+@@ -2403,7 +2545,7 @@ glob_helper(
  	}
  # endif
  # ifdef HAVE_GETATTRLIST
 -	if (is_case_sensitive(dirp, path) == 0)
-+	if (is_case_sensitive(dirp, path) == 0 /* tebako patch */ && !within_tebako_memfs(path))
++	if (is_case_sensitive(dirp, path) == 0 /* tebako patch */ && !tfs_memfs_path_p(path))
  	    flags |= FNM_CASEFOLD;
  # endif
          ruby_glob_entries_t globent;
-@@ -2576,7 +2583,7 @@ glob_helper(
+@@ -2576,7 +2718,7 @@ glob_helper(
  		    break;
  		}
  #if USE_NAME_ON_FS == USE_NAME_ON_FS_REAL_BASENAME
 -		if ((*cur)->type == ALPHA) {
-+		if ((*cur)->type == ALPHA /* tebako patch */ && !within_tebako_memfs(buf)) {
++		if ((*cur)->type == ALPHA /* tebako patch */ && !tfs_memfs_path_p(buf)) {
  		    buf = replace_real_basename(buf, pathlen + (dirsep != 0), enc,
  						IF_NORMALIZE_UTF8PATH(1)+0,
  						flags, &new_pathtype);
-@@ -3321,6 +3328,8 @@ rb_dir_s_empty_p(VALUE obj, VALUE dirname)
+@@ -3321,6 +3463,8 @@ rb_dir_s_empty_p(VALUE obj, VALUE dirname)
      path = RSTRING_PTR(dirname);
  
  #if defined HAVE_GETATTRLIST && defined ATTR_DIR_ENTRYCOUNT
-+    /* tebako patch */ if (!within_tebako_memfs(path))
++    /* tebako patch */ if (!tfs_memfs_path_p(path))
 +
      {
  	u_int32_t attrbuf[SIZEUP32(fsobj_tag_t)];

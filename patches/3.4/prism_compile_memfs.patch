@@ -3,22 +3,87 @@
 # Target:  prism_compile.c (pass2 (all platforms, ruby 3.4+))
 # Source:  tebako gem lib/tebako/packager/patch_literals.rb PatchLiterals::PRISM_PATCHES
 #
-# Read source files through tebako_string_file_init when the path is
-# inside the memfs (falling back to pm_read_file otherwise) and inject the
-# tebako memfs io headers.
+# Read source files through the modern libtfs C API (<tebako/fs/c_api.h>,
+# tebako_fs_*) when the path is inside the memfs (tfs_string_file_init,
+# composed on the c_api read surface and mirroring the legacy
+# tebako_string_file_init), falling back to pm_read_file otherwise. The
+# in-mount check is a mount-point prefix check vs the compiled-in
+# fs_mount_point (tebako_mount_point()).
 # X-Redesign: modern-api
 diff --git a/prism_compile.c b/prism_compile.c
 index c000b66..8bdb4d1 100644
 --- a/prism_compile.c
 +++ b/prism_compile.c
-@@ -1,5 +1,14 @@
+@@ -1,5 +1,76 @@
  #include "prism.h"
  
 +/* -- Start of tebako patch -- */
-+#include <tebako/tebako-config.h>
-+#include <tebako/tebako-defines.h>
-+#include <tebako/tebako-io.h>
-+#include <tebako/tebako-prism.h>
++#include <tebako/tebako-main.h> /* tebako_mount_point(): the compiled-in fs_mount_point */
++
++/* ruby/win32.h maps 'stat' onto stati128 on _WIN32; the libtfs C API fills
++   the CRT struct stat, so keep the plain name visible inside this block */
++#pragma push_macro("stat")
++#undef stat
++#include <tebako/fs/c_api.h>     /* modern libtfs C API (tebako_fs_*) */
++
++/* Route check: is path inside the memfs mount? (mount-point prefix check vs
++   the compiled-in fs_mount_point; the memfs is read-only -- writes/cwd go to
++   the host fs unchanged) */
++static int
++tfs_memfs_path_p(const char *path)
++{
++    const char *mount = tebako_mount_point();
++    size_t mount_len;
++    if (path == NULL || mount == NULL) return 0;
++    mount_len = strlen(mount);
++    return strncmp(path, mount, mount_len) == 0;
++}
++
++/* Read a source file from the read-only memfs, composed on the modern c_api
++   read surface (mirrors the legacy tebako_string_file_init) */
++static pm_string_init_result_t
++tfs_string_file_init(pm_string_t *string, const char *filepath)
++{
++    int fd;
++    struct stat sb;
++    size_t size;
++    uint8_t *source;
++    ssize_t bytes_read;
++
++    fd = tebako_fs_open(filepath, O_RDONLY);
++    if (fd == -1) {
++        return PM_STRING_INIT_ERROR_GENERIC;
++    }
++    if (tebako_fs_fstat(fd, &sb) == -1) {
++        tebako_fs_close(fd);
++        return PM_STRING_INIT_ERROR_GENERIC;
++    }
++    if (S_ISDIR(sb.st_mode)) {
++        tebako_fs_close(fd);
++        return PM_STRING_INIT_ERROR_DIRECTORY;
++    }
++    size = (size_t) sb.st_size;
++    if (size == 0) {
++        const uint8_t empty[] = "";
++        tebako_fs_close(fd);
++        *string = (pm_string_t) { .type = PM_STRING_CONSTANT, .source = empty, .length = 0 };
++        return PM_STRING_INIT_SUCCESS;
++    }
++    source = xmalloc(size);
++    if (source == NULL) {
++        tebako_fs_close(fd);
++        return PM_STRING_INIT_ERROR_GENERIC;
++    }
++    bytes_read = tebako_fs_read(fd, source, size);
++    tebako_fs_close(fd);
++    if (bytes_read == -1) {
++        xfree(source);
++        return PM_STRING_INIT_ERROR_GENERIC;
++    }
++    *string = (pm_string_t) { .type = PM_STRING_OWNED, .source = source, .length = size };
++    return PM_STRING_INIT_SUCCESS;
++}
++#pragma pop_macro("stat")
 +/* -- End of tebako patch -- */
 +
 +
@@ -26,16 +91,16 @@ index c000b66..8bdb4d1 100644
  /**
   * This compiler defines its own concept of the location of a node. We do this
   * because we want to pair line information with node identifier so that we can
-@@ -11281,7 +11290,18 @@ pm_read_file(pm_string_t *string, const char *filepath)
+@@ -11281,7 +11348,18 @@ pm_read_file(pm_string_t *string, const char *filepath)
  VALUE
  pm_load_file(pm_parse_result_t *result, VALUE filepath, bool load_error)
  {
 -    pm_string_init_result_t init_result = pm_read_file(&result->input, RSTRING_PTR(filepath));
 +    /* -- Start of tebako patch -- */
 +    pm_string_init_result_t init_result;
-+    if (within_tebako_memfs(RSTRING_PTR(filepath)))
++    if (tfs_memfs_path_p(RSTRING_PTR(filepath)))
 +    {
-+      init_result = tebako_string_file_init(&result->input, RSTRING_PTR(filepath));
++      init_result = tfs_string_file_init(&result->input, RSTRING_PTR(filepath));
 +    }
 +    else
 +    {

@@ -3,20 +3,180 @@
 # Target:  file.c (pass2 (all platforms))
 # Source:  tebako gem lib/tebako/packager/pass2_patch.rb Pass2Patch#patch_map_base
 #
-# Inject the tebako memfs io headers into file.c.
+# Route ruby's file metadata io into the tebako memfs via the modern libtfs
+# C API (<tebako/fs/c_api.h>, tebako_fs_*): paths under the compiled-in
+# fs_mount_point (tebako_mount_point()) go to the memfs, everything else to
+# the host fs (the memfs is read-only -- writes/cwd stay on the host).
+# access is stat-as-exists (the memfs holds no mode bits beyond existence);
+# lstat is served by stat (no symlink notion in the c_api). On msys the
+# routing hooks the rb_w32_* layer and converts the CRT struct stat the
+# c_api fills to ruby's stati128.
 # X-Redesign: modern-api
 diff --git a/file.c b/file.c
 index 585dd90..716725c 100644
 --- a/file.c
 +++ b/file.c
-@@ -93,6 +93,12 @@ int flock(int, int);
+@@ -93,6 +93,165 @@ int flock(int, int);
  # define lstat stat
  #endif
  
 +/* -- Start of tebako patch -- */
-+#include <tebako/tebako-config.h>
-+#include <tebako/tebako-defines.h>
-+#include <tebako/tebako-io.h>
++#include <tebako/tebako-main.h> /* tebako_mount_point(): the compiled-in fs_mount_point */
++
++/* ruby/win32.h maps 'stat' onto stati128 on _WIN32; the libtfs C API fills
++   the CRT struct stat, so keep the plain name visible inside this block */
++#pragma push_macro("stat")
++#undef stat
++#include <tebako/fs/c_api.h>     /* modern libtfs C API (tebako_fs_*) */
++
++/* Route check: is path inside the memfs mount? (mount-point prefix check vs
++   the compiled-in fs_mount_point; the memfs is read-only -- writes/cwd go to
++   the host fs unchanged) */
++static int
++tfs_memfs_path_p(const char *path)
++{
++    const char *mount = tebako_mount_point();
++    size_t mount_len;
++    if (path == NULL || mount == NULL) return 0;
++    mount_len = strlen(mount);
++    return strncmp(path, mount, mount_len) == 0;
++}
++
++#ifndef _WIN32
++static int
++tfs_stat(const char *path, struct stat *st)
++{
++    if (tfs_memfs_path_p(path)) return tebako_fs_stat(path, st);
++    return stat(path, st);
++}
++
++/* the memfs holds regular files/directories only (no symlink notion in the
++   c_api): stat serves as lstat */
++static int
++tfs_lstat(const char *path, struct stat *st)
++{
++    if (tfs_memfs_path_p(path)) return tebako_fs_stat(path, st);
++    return lstat(path, st);
++}
++
++/* access-as-exists: the memfs is read-only, so an entry that stats is
++   readable (mode bits beyond existence are a host fs concept here) */
++static int
++tfs_access(const char *path, int mode)
++{
++    if (tfs_memfs_path_p(path)) {
++        struct stat st;
++        return tebako_fs_stat(path, &st);
++    }
++    return access(path, mode);
++}
++
++static int
++tfs_fstat(int fd, struct stat *st)
++{
++    if (tebako_fd_is_embedded(fd)) {
++        return tebako_fs_fstat(fd, st);
++    }
++    return fstat(fd, st);
++}
++
++static int
++tfs_close(int fd)
++{
++    if (tebako_fd_is_embedded(fd)) {
++        return tebako_fs_close(fd);
++    }
++    return close(fd);
++}
++#else  /* _WIN32 */
++/* tebako_fs_stat fills a CRT struct stat; convert to ruby's stati128 */
++static void
++tfs_stat_to_stati128(const struct stat *i, struct stati128 *o)
++{
++    o->st_dev = i->st_dev;
++    o->st_ino = i->st_ino;
++    o->st_inohigh = 0;
++    o->st_mode = i->st_mode;
++    o->st_nlink = i->st_nlink;
++    o->st_uid = i->st_uid;
++    o->st_gid = i->st_gid;
++    o->st_rdev = i->st_rdev;
++    o->st_size = i->st_size;
++    o->st_atime = i->st_atime;
++    o->st_atimensec = 0;
++    o->st_mtime = i->st_mtime;
++    o->st_mtimensec = 0;
++    o->st_ctime = i->st_ctime;
++    o->st_ctimensec = 0;
++}
++
++static int
++tfs_ustati128(const char *path, struct stati128 *st)
++{
++    if (tfs_memfs_path_p(path)) {
++        struct stat stb;
++        int ret = tebako_fs_stat(path, &stb);
++        if (ret == 0) tfs_stat_to_stati128(&stb, st);
++        return ret;
++    }
++    return rb_w32_ustati128(path, st);
++}
++
++static int
++tfs_ulstati128(const char *path, struct stati128 *st)
++{
++    if (tfs_memfs_path_p(path)) {
++        struct stat stb;
++        int ret = tebako_fs_stat(path, &stb);
++        if (ret == 0) tfs_stat_to_stati128(&stb, st);
++        return ret;
++    }
++    return rb_w32_ulstati128(path, st);
++}
++
++/* access-as-exists, as above */
++static int
++tfs_uaccess(const char *path, int mode)
++{
++    if (tfs_memfs_path_p(path)) {
++        struct stat stb;
++        return tebako_fs_stat(path, &stb);
++    }
++    return rb_w32_uaccess(path, mode);
++}
++
++static int
++tfs_fstati128(int fd, struct stati128 *st)
++{
++    if (tebako_fd_is_embedded(fd)) {
++        struct stat stb;
++        int ret = tebako_fs_fstat(fd, &stb);
++        if (ret == 0) tfs_stat_to_stati128(&stb, st);
++        return ret;
++    }
++    return rb_w32_fstati128(fd, st);
++}
++#endif /* _WIN32 */
++#pragma pop_macro("stat")
++
++#ifndef _WIN32
++#define stat(...) tfs_stat(__VA_ARGS__)
++#ifdef lstat
++#undef lstat
++#endif
++#define lstat(...) tfs_lstat(__VA_ARGS__)
++#define access(...) tfs_access(__VA_ARGS__)
++#ifdef HAVE_EACCESS
++#define eaccess(...) tfs_access(__VA_ARGS__)
++#endif
++#define fstat(...) tfs_fstat(__VA_ARGS__)
++#define close(...) tfs_close(__VA_ARGS__)
++#else  /* _WIN32 */
++#define rb_w32_ustati128(...) tfs_ustati128(__VA_ARGS__)
++#define rb_w32_ulstati128(...) tfs_ulstati128(__VA_ARGS__)
++#define rb_w32_uaccess(...) tfs_uaccess(__VA_ARGS__)
++#define rb_w32_fstati128(...) tfs_fstati128(__VA_ARGS__)
++#endif /* _WIN32 */
 +/* -- End of tebako patch -- */
 +
  /* define system APIs */
