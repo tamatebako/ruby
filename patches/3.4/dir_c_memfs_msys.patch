@@ -18,7 +18,7 @@ diff --git a/dir.c b/dir.c
 index b0ff322..1d39e60 100644
 --- a/dir.c
 +++ b/dir.c
-@@ -127,6 +127,164 @@ char *strchr(char*,char);
+@@ -127,6 +127,166 @@ char *strchr(char*,char);
  
  #define vm_initialized rb_cThread
  
@@ -90,7 +90,9 @@ index b0ff322..1d39e60 100644
 +    if (tebako_fs_dir_is_embedded((tebako_dir_t) dirp)) {
 +        return tebako_fs_closedir((tebako_dir_t) dirp);
 +    }
-+    return rb_w32_closedir(dirp);
++    /* rb_w32_closedir is void before ruby 3.4; the shim reports success */
++    rb_w32_closedir(dirp);
++    return 0;
 +}
 +
 +static void
@@ -183,7 +185,7 @@ index b0ff322..1d39e60 100644
  /* define system APIs */
  #ifdef _WIN32
  # undef chdir
-@@ -615,7 +773,7 @@ dir_initialize(rb_execution_context_t *ec, VALUE dir, VALUE dirname, VALUE enc)
+@@ -615,7 +775,7 @@ dir_initialize(rb_execution_context_t *ec, VALUE dir, VALUE dirname, VALUE enc)
              dp->dir = opendir_without_gvl(path);
          }
  #ifdef HAVE_GETATTRLIST
@@ -192,7 +194,7 @@ index b0ff322..1d39e60 100644
              u_int32_t attrbuf[1];
              struct attrlist al = {ATTR_BIT_MAP_COUNT, 0};
              struct getattrlist_args args = GETATTRLIST_ARGS(&al, attrbuf, FSOPT_NOFOLLOW);
-@@ -2849,7 +3007,7 @@ glob_helper(
+@@ -2849,7 +3009,7 @@ glob_helper(
          }
  # endif
  # ifdef HAVE_GETATTRLIST
@@ -201,7 +203,7 @@ index b0ff322..1d39e60 100644
              flags |= FNM_CASEFOLD;
  # endif
          ruby_glob_entries_t globent;
-@@ -3022,7 +3180,7 @@ glob_helper(
+@@ -3022,7 +3182,7 @@ glob_helper(
                      break;
                  }
  #if USE_NAME_ON_FS == USE_NAME_ON_FS_REAL_BASENAME
@@ -210,7 +212,7 @@ index b0ff322..1d39e60 100644
                      buf = replace_real_basename(buf, pathlen + (dirsep != 0), enc,
                                                  IF_NORMALIZE_UTF8PATH(1)+0,
                                                  flags, &new_pathtype);
-@@ -3775,6 +3933,8 @@ rb_dir_s_empty_p(VALUE obj, VALUE dirname)
+@@ -3775,6 +3935,8 @@ rb_dir_s_empty_p(VALUE obj, VALUE dirname)
      path = RSTRING_PTR(dirname);
  
  #if defined HAVE_GETATTRLIST && defined ATTR_DIR_ENTRYCOUNT
