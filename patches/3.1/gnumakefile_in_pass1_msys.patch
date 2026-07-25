@@ -34,7 +34,7 @@ index b38df46..c05a1b1 100644
  	$(ECHO) linking $@
  	$(Q) $(PURIFY) $(CC) -mwindows -e $(SYMBOL_PREFIX)mainCRTStartup $(LDFLAGS) $(XLDFLAGS) \
 -	  $(MAINOBJ) $(EXTOBJS) $(LIBRUBYARG) $(LIBS) -o $@
-+	  $(WINMAINOBJ) $(EXTOBJS) $(LIBRUBYARG) -Wl,--start-group $(LIBS) -Wl,--end-group -o $@  # tebako patched
++	  $(WINMAINOBJ) $(EXTOBJS) $(LIBRUBYARG) -Wl,--start-group $(MAINLIBS) -Wl,--end-group -o $@  # tebako patched
  $(STUBPROGRAM): $(RUBY_INSTALL_NAME).res.@OBJEXT@
  
  $(RUBY_EXP): $(LIBRUBY_A)
