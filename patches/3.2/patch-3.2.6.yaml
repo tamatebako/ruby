@@ -1,11 +1,7 @@
-# ruby 3.2.7 patch manifest (canonical tfs-ruby layout).
+# ruby 3.2.6 patch manifest (canonical tfs-ruby layout).
 # Entries apply in listed order. Schema: schema/patches.schema.yml.
-version: "3.2.7"
+version: "3.2.6"
 patches:
-  - feature: onigmo_h_onig_extern_msys
-    file: onigmo_h_onig_extern_msys_7.patch
-  - feature: winmain_c_wwinmain_msys
-    file: winmain_c_wwinmain_msys_7.patch
   - feature: win32_clock_rename_msys
     file: win32_clock_rename_msys.patch
   - feature: io_console_win32_vk_signature_msys
