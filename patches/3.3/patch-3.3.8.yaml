@@ -1,0 +1,8 @@
+# ruby 3.3.8 patch manifest (canonical tfs-ruby layout).
+# Carried forward by the release monitor (patches verified to apply to 3.3.8).
+version: "3.3.8"
+patches:
+  - feature: onigmo_h_onig_extern_msys
+    file: onigmo_h_onig_extern_msys_7.patch
+  - feature: winmain_c_wwinmain_msys
+    file: ../3.2/winmain_c_wwinmain_msys_7.patch
