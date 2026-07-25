@@ -26,6 +26,9 @@ patches:
   - feature: gnumakefile_in_pass1_msys
     file: gnumakefile_in_pass1_msys_7.patch
     version: "7"
+  - feature: gnumakefile_in_pass1_msys
+    file: gnumakefile_in_pass1_msys_7.patch
+    version: "8"
   # final-build GNUmakefile.in; content diverges per patch release (complete partition of the line)
   - feature: gnumakefile_in_pass2_msys
     file: gnumakefile_in_pass2_msys_4.patch
@@ -39,6 +42,9 @@ patches:
   - feature: gnumakefile_in_pass2_msys
     file: gnumakefile_in_pass2_msys_7.patch
     version: "7"
+  - feature: gnumakefile_in_pass2_msys
+    file: gnumakefile_in_pass2_msys_7.patch
+    version: "8"
   # signature fixed upstream since ruby 3.4; applies to 3.1-3.3 only
   - feature: io_console_win32_vk_signature_msys
     file: ../3.1/io_console_win32_vk_signature_msys.patch
