@@ -6,3 +6,5 @@ patches:
     file: onigmo_h_onig_extern_msys_7.patch
   - feature: winmain_c_wwinmain_msys
     file: ../3.2/winmain_c_wwinmain_msys_7.patch
+  - feature: win32_clock_rename_msys
+    file: win32_clock_rename_msys.patch

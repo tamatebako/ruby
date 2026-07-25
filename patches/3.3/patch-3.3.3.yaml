@@ -1,0 +1,6 @@
+# ruby 3.3.3 patch manifest (canonical tfs-ruby layout).
+# Entries apply in listed order. Schema: schema/patches.schema.yml.
+version: "3.3.3"
+patches:
+  - feature: win32_clock_rename_msys
+    file: win32_clock_rename_msys.patch
