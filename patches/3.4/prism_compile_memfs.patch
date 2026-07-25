@@ -14,12 +14,13 @@ diff --git a/prism_compile.c b/prism_compile.c
 index c000b66..8bdb4d1 100644
 --- a/prism_compile.c
 +++ b/prism_compile.c
-@@ -1,5 +1,77 @@
+@@ -1,5 +1,78 @@
  #include "prism.h"
  
 +/* -- Start of tebako patch -- */
 +#include <tebako/tebako-main.h> /* tebako_mount_point(): the compiled-in fs_mount_point */
 +#include <string.h>               /* strlen/strncmp/memset/memcpy used below */
++#include <fcntl.h>                /* O_RDONLY (not transitive on mingw) */
 +
 +/* ruby/win32.h maps 'stat' onto stati128 on _WIN32; the libtfs C API fills
 +   the CRT struct stat, so keep the plain name visible inside this block */
@@ -92,7 +93,7 @@ index c000b66..8bdb4d1 100644
  /**
   * This compiler defines its own concept of the location of a node. We do this
   * because we want to pair line information with node identifier so that we can
-@@ -11281,7 +11353,18 @@ pm_read_file(pm_string_t *string, const char *filepath)
+@@ -11281,7 +11354,18 @@ pm_read_file(pm_string_t *string, const char *filepath)
  VALUE
  pm_load_file(pm_parse_result_t *result, VALUE filepath, bool load_error)
  {
