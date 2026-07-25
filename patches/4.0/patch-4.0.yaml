@@ -53,8 +53,10 @@ patches:
     file: ../3.3/rubygems_path_support_msys.patch
   - feature: thread_pthread_main_stack_musl
     file: thread_pthread_main_stack_musl.patch
-  - feature: win32_clock_rename_msys
-    file: win32_clock_rename_msys.patch
+  # win32_clock_rename_msys intentionally absent on 4.0: ruby's win32.h now
+  # prefixes clock_gettime/clock_getres to rb_w32_clock_* via macro, so the
+  # winpthreads collision is solved upstream; renaming the definition
+  # orphans every caller (undefined rb_w32_clock_gettime at link)
   - feature: winmain_c_wwinmain_msys
     file: ../3.2/winmain_c_wwinmain_msys_7.patch
   - feature: dir_c_memfs
