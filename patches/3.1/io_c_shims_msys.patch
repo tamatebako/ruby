@@ -15,7 +15,7 @@ diff --git a/io.c b/io.c
 index 1bfd39d..54d88d9 100644
 --- a/io.c
 +++ b/io.c
-@@ -174,10 +174,144 @@ off_t __syscall(quad_t number, ...);
+@@ -174,10 +174,148 @@ off_t __syscall(quad_t number, ...);
  #define IO_RBUF_CAPA_FOR(fptr) (NEED_READCONV(fptr) ? IO_CBUF_CAPA_MIN : IO_RBUF_CAPA_MIN)
  #define IO_WBUF_CAPA_MIN  8192
  
@@ -130,6 +130,10 @@ index 1bfd39d..54d88d9 100644
 +    if (!tebako_fd_is_embedded(fd)) {
 +        return fcntl(fd, cmd, arg);
 +    }
++#ifndef F_GETFL
++#define F_GETFL 3 /* mingw: ruby's win32.h keeps F_GETFL inside #if 0 */
++#endif
++
 +    switch (cmd) {
 +    case F_GETFD:
 +        return cloexec_flags;

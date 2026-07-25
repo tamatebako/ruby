@@ -17,7 +17,7 @@ diff --git a/io.c b/io.c
 index 95282b0..eac65b9 100644
 --- a/io.c
 +++ b/io.c
-@@ -175,10 +175,159 @@ off_t __syscall(quad_t number, ...);
+@@ -175,10 +175,163 @@ off_t __syscall(quad_t number, ...);
  
  #define IO_MAX_BUFFER_GROWTH 8 * 1024 * 1024 // 8MB
  
@@ -146,6 +146,10 @@ index 95282b0..eac65b9 100644
 +    if (!tebako_fd_is_embedded(fd)) {
 +        return fcntl(fd, cmd, arg);
 +    }
++#ifndef F_GETFL
++#define F_GETFL 3 /* mingw: ruby's win32.h keeps F_GETFL inside #if 0 */
++#endif
++
 +    switch (cmd) {
 +    case F_GETFD:
 +        return cloexec_flags;
