@@ -8,6 +8,11 @@ versions:
     sha256: 0d0dafb859e76763432571a3109d1537d976266be3083445651dc68deed25c22
     line: '3.1'
     scenarios: [linux-gnu, linux-musl, msys]
+  3.1.7:
+    url: https://cache.ruby-lang.org/pub/ruby/3.1/ruby-3.1.7.tar.gz
+    sha256: 0556acd69f141ddace03fa5dd8d76e7ea0d8f5232edf012429579bcdaab30e7b
+    line: '3.1'
+    scenarios: [linux-gnu, linux-musl, msys]
   3.2.4:
     url: https://cache.ruby-lang.org/pub/ruby/3.2/ruby-3.2.4.tar.gz
     sha256: c72b3c5c30482dca18b0f868c9075f3f47d8168eaf626d4e682ce5b59c858692

@@ -1,0 +1,62 @@
+# main_c_tebako_main_7.patch
+#
+# Target:  main.c (pass2 (all platforms))
+# Source:  tebako gem lib/tebako/packager/patch_main.rb PatchMain
+#
+# 3.1.7 variant: upstream added the _WIN32 w32_main/wmain block above
+# main(); the same hooks apply with the drifted context.
+# Hook tebako_main(argc, argv) into the ruby entry point (memfs mount +
+# package startup) and record the original working directory in
+# $tebako_original_pwd (skipped when running miniruby).
+# X-Redesign: modern-api
+diff --git a/main.c b/main.c
+index f16d43a..107a288 100644
+--- a/main.c
++++ b/main.c
+@@ -30,16 +30,21 @@
+ #endif
+ #if defined RUBY_DEBUG_ENV && !RUBY_DEBUG_ENV
+ # undef RUBY_DEBUG_ENV
+ #endif
+ 
+ #ifdef _WIN32
+ #define main(argc, argv) w32_main(argc, argv)
+ static int main(int argc, char **argv);
+ int wmain(void) {return main(0, NULL);}
+ #endif
+ 
++/* -- Start of tebako patch -- */
++#include <tebako/tebako-main.h>
++/* -- End of tebako patch -- */
++
+ int
+ main(int argc, char **argv)
++
+ {
+ #ifdef RUBY_DEBUG_ENV
+     ruby_set_debug_option(getenv("RUBY_DEBUG"));
+@@ -41,9 +52,24 @@ main(int argc, char **argv)
+ #endif
+ 
+     ruby_sysinit(&argc, &argv);
++/* -- Start of tebako patch -- */
++    if (tebako_main(&argc, &argv) != 0) {
++        printf("Tebako intialization failed.");
++        return -1;
++    }
++/* -- End of tebako patch -- */
++
+     {
+ 	RUBY_INIT_STACK;
+ 	ruby_init();
++/* -- Start of tebako patch -- */
++    if (!tebako_is_running_miniruby())
++    {
++        VALUE cwd = rb_str_new_cstr(tebako_original_pwd());
++        rb_gv_set("$tebako_original_pwd", cwd);
++    }
++/* -- End of tebako patch -- */
++
+ 	return ruby_run_node(ruby_options(argc, argv));
+     }
+ }
