@@ -33,7 +33,7 @@ RSpec.describe Tfs::Onboarder do
         diff --git a/hello.txt b/hello.txt
         --- a/hello.txt
         +++ b/hello.txt
-        @@ -1,3 +1,3 @@
+        @@ -1,1 +1,1 @@
         -this context does not exist in the fixture tree
         +patched
       PATCH
@@ -130,6 +130,9 @@ RSpec.describe Tfs::Onboarder do
 
       expect(result).not_to be_applied
       expect(result.failing).to eq(["bogus.patch"])
+      expect(result.failures.keys).to eq(["bogus.patch"])
+      expect(result.failures["bogus.patch"]).to include("patch failed")
+      expect(result.failures["bogus.patch"]).to include("hello.txt")
       expect(result.written).to eq([])
 
       expect(File.read(File.join(dir, "versions.yml"))).not_to include("3.3.8")

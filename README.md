@@ -179,11 +179,17 @@ release; `.github/workflows/release-monitor.yml`
 (daily 06:17 UTC + manual dispatch) detects new official ruby releases and
 onboards each on its own lane: a clean onboard opens an
 "Onboard ruby X.Y.Z" pull request (peter-evans/create-pull-request), a
-failing one files an issue naming the version and the failing patches.
-Optionally (repo variable `RELEASE_MONITOR_DISPATCH=true` +
-`TEBAKO_DISPATCH_TOKEN` secret) a clean onboard fires a
-`repository_dispatch` (event `tebako release`) to
+failing one files an issue naming the version and the failing patches,
+with each patch's git apply hunk output. Optionally (repo variable
+`RELEASE_MONITOR_DISPATCH=true` + `TEBAKO_DISPATCH_TOKEN` secret) a clean
+onboard fires a `repository_dispatch` (event `tebako release`) to
 tamatebako/tebako-runtime-ruby.
+`.github/workflows/runtime-pin-bump.yml` closes the loop: on every
+successful release-src publish (workflow_run) it reads the published tag
+from the run's `release-tag` artifact and fires a `repository_dispatch`
+(event `tfs-ruby-src-release`, `TEBAKO_CI_PAT_TOKEN` secret) to
+tamatebako/tebako-runtime-ruby, which opens a pull request bumping its
+`DEFAULT_RELEASE` pin to that tag.
 
 Specs (`bundle exec rspec`): manifest parsing, selection/supersede/scenario
 logic, and apply correctness against tiny local fixtures (no network).

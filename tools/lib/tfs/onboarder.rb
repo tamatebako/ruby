@@ -22,17 +22,20 @@ module Tfs
   # On any failure every touched file is restored; nothing is released
   # silently.
   class Onboarder
-    # The outcome of one onboarding attempt.
+    # The outcome of one onboarding attempt. `failures` maps each failing
+    # patch name to its git apply output (the failing hunk), so the monitor
+    # workflow can file an issue that carries the actual drift.
     class Result
-      def initialize(version:, applied:, failing:, written:, extended:)
+      def initialize(version:, applied:, failing:, written:, extended:, failures: {})
         @version = version
         @applied = applied
         @failing = failing
         @written = written
         @extended = extended
+        @failures = failures
       end
 
-      attr_reader :version, :failing, :written, :extended
+      attr_reader :version, :failing, :written, :extended, :failures
 
       def applied?
         @applied
@@ -40,7 +43,7 @@ module Tfs
 
       def to_h
         { "version" => @version, "applied" => applied?, "failing" => @failing,
-          "extended" => @extended, "written" => @written }
+          "failures" => @failures, "extended" => @extended, "written" => @written }
       end
     end
 
@@ -69,13 +72,15 @@ module Tfs
         build_prep.audit(version_name, dir, patches: selected_patches(version_name) + candidates)
       end
 
-      failing = outcomes.select(&:failed?).map { |outcome| outcome.patch.name }
+      failing_outcomes = outcomes.select(&:failed?)
+      failing = failing_outcomes.map { |outcome| outcome.patch.name }
+      failures = failing_outcomes.to_h { |outcome| [outcome.patch.name, outcome.detail] }
       applied = failing.empty?
       carry_overlay(line, patchlevel, candidates, originals, written) if applied && candidates.any?
       restore(originals) unless applied
 
       Result.new(version: version_name, applied: applied, failing: failing,
-                 written: applied ? written.uniq : [], extended: extended)
+                 written: applied ? written.uniq : [], extended: extended, failures: failures)
     end
 
     private
