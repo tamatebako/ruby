@@ -75,6 +75,16 @@ jobs:
         run: |
           cat *.sha256 > SHA256SUMS
           rm -f *.sha256
+      # Record the published tag so the workflow_run follow-up
+      # (runtime-pin-bump.yml) can read it back deterministically for both
+      # trigger paths (tag push and manual dispatch).
+      - name: record release tag
+        run: echo "${{ github.event_name == 'push' && github.ref_name || inputs.release_tag }}" > release-tag.txt
+      - uses: actions/upload-artifact@v4
+        with:
+          name: release-tag
+          path: release-tag.txt
+          retention-days: 1
       - uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ github.event_name == 'push' && github.ref_name || inputs.release_tag }}

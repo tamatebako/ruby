@@ -72,7 +72,7 @@ jobs:
             --title "Onboard ruby ${{ matrix.version }}: patches fail to apply" \
             --body "The release monitor could not onboard ruby **${{ matrix.version }}** -- some patches do not apply to the official tarball. No release was made.
 
-          Failing patches and full result:
+          Failing patches, with the git apply hunk output for each under \`failures\`:
           \`\`\`json
           $(cat monitor-result.json)
           \`\`\`"
