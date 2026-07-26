@@ -16,7 +16,7 @@ diff --git a/io.c b/io.c
 index 95282b0..79087c0 100644
 --- a/io.c
 +++ b/io.c
-@@ -175,6 +175,138 @@ off_t __syscall(quad_t number, ...);
+@@ -175,6 +175,173 @@ off_t __syscall(quad_t number, ...);
  
  #define IO_MAX_BUFFER_GROWTH 8 * 1024 * 1024 // 8MB
  
@@ -143,6 +143,40 @@ index 95282b0..79087c0 100644
 +    }
 +}
 +
++#ifdef HAVE_FCOPYFILE
++/* fcopyfile(3) on a memfs src fd: the kernel cannot see embedded fds (the
++   c_api hands out flagged virtual descriptors), so the copy is emulated as
++   a read/write loop. The dst fd is always a host fd -- the memfs is
++   read-only. The COPIED byte count is reported through the state, which
++   ruby's copy_stream reads back. */
++static int
++tfs_fcopyfile(int sfd, int dfd, copyfile_state_t state, copyfile_flags_t flags)
++{
++    char buf[65536];
++    off_t copied = 0;
++    ssize_t n;
++
++    if (!tebako_fd_is_embedded(sfd)) {
++        return fcopyfile(sfd, dfd, state, flags);
++    }
++    while ((n = tebako_fs_read(sfd, buf, sizeof(buf))) > 0) {
++        ssize_t done = 0;
++
++        while (done < n) {
++            ssize_t w = write(dfd, buf + done, (size_t)(n - done));
++            if (w < 0) {
++                if (errno == EINTR) continue;
++                return -1;
++            }
++            done += w;
++        }
++        copied += n;
++    }
++    if (n < 0) return -1;
++    if (state != NULL) copyfile_state_set(state, COPYFILE_STATE_COPIED, &copied);
++    return 0;
++}
++#endif
 +#define open(...) tfs_open(__VA_ARGS__)
 +#define read(...) tfs_read(__VA_ARGS__)
 +#define pread(...) tfs_pread(__VA_ARGS__)
@@ -150,6 +184,7 @@ index 95282b0..79087c0 100644
 +#define close(...) tfs_close(__VA_ARGS__)
 +#define fstat(...) tfs_fstat(__VA_ARGS__)
 +#define fcntl(...) tfs_fcntl(__VA_ARGS__)
++#define fcopyfile(...) tfs_fcopyfile(__VA_ARGS__)
 +/* -- End of tebako patch -- */
 +
  /* define system APIs */
