@@ -11,6 +11,8 @@
 # lstat is served by stat (no symlink notion in the c_api). On msys the
 # routing hooks the rb_w32_* layer and converts the CRT struct stat the
 # c_api fills to ruby's stati128.
+# ruby 4.0 on linux routes File.stat/lstat/IO#stat through statx(2),
+# so a second hunk hooks statx for in-mount paths/embedded fds.
 # X-Redesign: modern-api
 diff --git a/file.c b/file.c
 index 89294ea..9bab75a 100644
@@ -183,3 +185,52 @@ index 89294ea..9bab75a 100644
  /* define system APIs */
  #ifdef _WIN32
  # include "win32/file.h"
+@@ -1304,7 +1464,48 @@ statx(int dirfd, const char *pathname, int flags,
+ }
+ #   endif /* __linux__ */
+ # endif /* HAVE_STATX */
+ 
++/* -- Start of tebako patch -- */
++/* ruby 4.0 on linux routes File.stat/lstat through statx(2): fill the
++   caller's struct statx from the memfs for in-mount paths (and from
++   tebako_fs_fstat for embedded fds); everything else passes to the host.
++   The memfs carries no birthtime, so STATX_BTIME stays out of the mask
++   (File::Stat#birthtime raises NotImplementedError, like any fs without
++   btime) */
++static void
++tfs_stat_to_statx(const struct stat *i, struct statx *o)
++{
++    memset(o, 0, sizeof(*o));
++    o->stx_mask = STATX_BASIC_STATS;
++    o->stx_mode = i->st_mode;
++    o->stx_nlink = i->st_nlink;
++    o->stx_uid = i->st_uid;
++    o->stx_gid = i->st_gid;
++    o->stx_ino = i->st_ino;
++    o->stx_size = i->st_size;
++    o->stx_mtime.tv_sec = i->st_mtime;
++}
++
++static int
++tfs_statx(int dirfd, const char *pathname, int flags, unsigned int mask, struct statx *statxbuf)
++{
++    struct stat st;
++    if ((dirfd == AT_FDCWD || (pathname != NULL && pathname[0] == '/')) &&
++        tfs_memfs_path_p(pathname)) {
++        if (tebako_fs_stat(pathname, &st) != 0) return -1;
++        tfs_stat_to_statx(&st, statxbuf);
++        return 0;
++    }
++    if (tebako_fd_is_embedded(dirfd)) {
++        if (tebako_fs_fstat(dirfd, &st) != 0) return -1;
++        tfs_stat_to_statx(&st, statxbuf);
++        return 0;
++    }
++    return statx(dirfd, pathname, flags, mask, statxbuf);
++}
++#define statx(...) tfs_statx(__VA_ARGS__)
++/* -- End of tebako patch -- */
++
+ typedef struct no_gvl_rb_io_stat_data {
+     struct statx *stx;
+     int fd;
