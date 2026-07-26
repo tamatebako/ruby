@@ -185,7 +185,7 @@ index 89294ea..9bab75a 100644
  /* define system APIs */
  #ifdef _WIN32
  # include "win32/file.h"
-@@ -1304,7 +1464,48 @@ statx(int dirfd, const char *pathname, int flags,
+@@ -1304,7 +1464,52 @@ statx(int dirfd, const char *pathname, int flags,
  }
  #   endif /* __linux__ */
  # endif /* HAVE_STATX */
@@ -196,7 +196,11 @@ index 89294ea..9bab75a 100644
 +   tebako_fs_fstat for embedded fds); everything else passes to the host.
 +   The memfs carries no birthtime, so STATX_BTIME stays out of the mask
 +   (File::Stat#birthtime raises NotImplementedError, like any fs without
-+   btime) */
++   btime).
++   NOTE: tebako_fd_is_embedded is a TEBAKO_FD_FLAG (0x40000000) bit check,
++   and AT_FDCWD (-100) has that bit set — the fd branch must be gated on
++   dirfd >= 0 or every host statx(AT_FDCWD, ...) would be misrouted into
++   the memfs and fail EBADF (breaks rbinstall at build time). */
 +static void
 +tfs_stat_to_statx(const struct stat *i, struct statx *o)
 +{
@@ -221,7 +225,7 @@ index 89294ea..9bab75a 100644
 +        tfs_stat_to_statx(&st, statxbuf);
 +        return 0;
 +    }
-+    if (tebako_fd_is_embedded(dirfd)) {
++    if (dirfd >= 0 && tebako_fd_is_embedded(dirfd)) {
 +        if (tebako_fs_fstat(dirfd, &st) != 0) return -1;
 +        tfs_stat_to_statx(&st, statxbuf);
 +        return 0;
