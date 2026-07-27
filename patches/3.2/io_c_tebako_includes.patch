@@ -6,7 +6,10 @@
 # Route ruby's io into the tebako memfs via the modern libtfs C API
 # (<tebako/fs/c_api.h>, tebako_fs_*): paths under the compiled-in
 # fs_mount_point (tebako_mount_point()) go to the memfs, everything else to
-# the host fs (the memfs is read-only -- writes/cwd stay on the host).
+# the host fs. The memfs is read-only: a write open on an in-mount path
+# fails EROFS (POSIX) rather than falling through to the host open, which
+# answered ENOENT for a path that does not exist there and defeated the
+# callers' read-only-fs degradation (bundler's ProcessLock rescue).
 # File-descriptor calls dispatch on tebako_fd_is_embedded() (the c_api FD
 # introspection), so host pipes/sockets keep their native behavior.
 # libtfs c_api extension (requested): tebako_fs_pread -- a positional read
@@ -16,7 +19,7 @@ diff --git a/io.c b/io.c
 index 3a704fa..ac006ba 100644
 --- a/io.c
 +++ b/io.c
-@@ -169,6 +169,173 @@ off_t __syscall(quad_t number, ...);
+@@ -169,6 +169,184 @@ off_t __syscall(quad_t number, ...);
  
  #define IO_MAX_BUFFER_GROWTH 8 * 1024 * 1024 // 8MB
  
@@ -26,8 +29,9 @@ index 3a704fa..ac006ba 100644
 +#include <tebako/fs/c_api.h>     /* modern libtfs C API (tebako_fs_*) */
 +
 +/* Route check: is path inside the memfs mount? (mount-point prefix check vs
-+   the compiled-in fs_mount_point; the memfs is read-only -- writes/cwd go to
-+   the host fs unchanged) */
++   the compiled-in fs_mount_point; the memfs is read-only -- write opens on
++   in-mount paths fail EROFS, everything else goes to the host fs
++   unchanged) */
 +static int
 +tfs_memfs_path_p(const char *path)
 +{
@@ -44,8 +48,18 @@ index 3a704fa..ac006ba 100644
 +    va_list ap;
 +    mode_t mode = 0;
 +
-+    if (tfs_memfs_path_p(path) && (flags & (O_WRONLY | O_RDWR | O_CREAT | O_TRUNC)) == 0) {
-+        return tebako_fs_open(path, flags);
++    if (tfs_memfs_path_p(path)) {
++        if ((flags & (O_WRONLY | O_RDWR | O_CREAT | O_TRUNC)) == 0) {
++            return tebako_fs_open(path, flags);
++        }
++        /* The memfs is read-only: a write open on an in-mount path fails
++           EROFS (POSIX), so callers' read-only-fs degradation engages
++           (bundler's ProcessLock rescues EROFS and skips locking) instead
++           of the host-open fall-through, which answered ENOENT for a path
++           that does not exist on the host and matched none of the
++           rescues. */
++        errno = EROFS;
++        return -1;
 +    }
 +    va_start(ap, flags);
 +    if (flags & O_CREAT) {
