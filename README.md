@@ -172,6 +172,22 @@ wires children with `autoload`):
   overlay forward, and lints the whole set with `git apply --check`
   against the sha256-verified tarball. On any failure every touched file
   is restored — nothing is released silently.
+- `tools/smoke_matrix <release-tag>` — prints the release-src
+  compile-smoke matrix: one leg per (changed patch line × scenario) using
+  the newest version of each line whose `patches/<line>/` folder changed
+  since the previous release tag (all lines when there is none).
+- `tools/compile_smoke <version> [outdir] [--platform NAME] [--pass 1|2]` —
+  the release-src compile gate. Applies the version's patch set for one
+  scenario, configures the tree, and compiles every translation unit the
+  selected patches touch (`make <obj>` per patched `.c`; sources that are
+  `#include`d into another TU — `thread_pthread.c`, `thread_win32.c`,
+  `prism_compile.c` — are compiled through their including object). The
+  patched TUs resolve the tebako memfs headers from the vendored
+  compile-smoke stubs in `ci/include` (they declare exactly the c_api
+  surface the patches use, mirroring the real libtfs headers). Toolchains:
+  linux-gnu native cc, linux-musl `musl-gcc`, msys the
+  `x86_64-w64-mingw32` cross gcc. Fails named:
+  `FAIL <version> (<platform>): <objects> did not compile`.
 
 CI: `.github/workflows/lint-patches.yml` lints every version on a matrix
 generated from versions.yml; `.github/workflows/release-src.yml` (tags
@@ -180,7 +196,12 @@ generated from versions.yml; `.github/workflows/release-src.yml` (tags
 scenario matrix (`linux-gnu` stays the unsuffixed back-compat asset; msys
 ships `-msys-pass1`/`-msys-pass2`), verifies each artifact against the
 apply output, and publishes the tarballs plus a `SHA256SUMS` to the
-release; `.github/workflows/release-monitor.yml`
+release. Publish is gated on the compile-smoke matrix (roadmap 17.0; the
+v0.2.8 lesson — a patch release shipped apply-clean but uncompilable and
+broke every linux runtime leg): one representative leg per changed patch
+line × scenario (newest version of the line), each compiling the patched
+translation units far enough to catch a broken shim — no full runtime
+build. `.github/workflows/release-monitor.yml`
 (daily 06:17 UTC + manual dispatch) detects new official ruby releases and
 onboards each on its own lane: a clean onboard opens an
 "Onboard ruby X.Y.Z" pull request (peter-evans/create-pull-request), a

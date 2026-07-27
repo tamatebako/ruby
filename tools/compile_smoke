@@ -1,0 +1,99 @@
+#!/usr/bin/env ruby
+# frozen_string_literal: true
+
+# Usage: tools/compile_smoke <version> [outdir] [--platform NAME] [--pass 1|2]
+# The release-src compile gate (roadmap 17.0): applies the version's patch
+# set for one coherent build scenario, configures the tree, and compiles
+# every translation unit the selected patches touch -- the cheapest compile
+# that catches a broken shim (a patch that applies cleanly but does not
+# compile; the v0.2.8 lesson: a patch release shipped apply-clean but
+# uncompilable and broke every linux runtime leg). No runtime build, no
+# linking, no exts.
+#
+# Toolchain per platform: linux-gnu native cc, linux-musl musl-gcc,
+# msys the x86_64-w64-mingw32 cross gcc (--host). The patched TUs include
+# the tebako memfs headers (<tebako/tebako-main.h>, <tebako/fs/c_api.h>),
+# resolved from the vendored compile-smoke stubs in ci/include (they
+# declare exactly the c_api surface the patches use, mirroring the real
+# libtfs headers; the runtime build links the real ones).
+#
+# Headers and other non-C patch targets (common.mk, tool/mkconfig.rb,
+# *.rbinc templates, config.status) are not translation units and are
+# skipped. C sources that are #included into another TU (thread_pthread.c,
+# thread_win32.c, prism_compile.c) are compiled through their including
+# object.
+
+$LOAD_PATH.unshift(File.expand_path("lib", __dir__))
+require "tfs"
+require "fileutils"
+require "open3"
+require "optparse"
+
+REPO_ROOT = File.expand_path("..", __dir__)
+STUB_INCLUDE = File.join(REPO_ROOT, "ci", "include").freeze
+
+# C sources that carry no object of their own: they are #included into
+# another TU, so compiling the including object covers them.
+INCLUDED_C = {
+  "thread_pthread.c" => "thread.o",
+  "thread_win32.c" => "thread.o",
+  "prism_compile.c" => "compile.o"
+}.freeze
+
+PLATFORM_CONFIG = {
+  "linux-gnu" => { "env" => {}, "configure" => [] },
+  "linux-musl" => { "env" => { "CC" => "musl-gcc" }, "configure" => [] },
+  "msys" => { "env" => {}, "configure" => ["--host=x86_64-w64-mingw32"] }
+}.freeze
+
+def native_platform
+  case RUBY_PLATFORM
+  when /linux-musl/ then "linux-musl"
+  when /linux/ then "linux-gnu"
+  when /msys|mingw|cygwin/ then "msys"
+  else abort "tools/compile_smoke: cannot detect platform #{RUBY_PLATFORM}; pass --platform"
+  end
+end
+
+options = { platform: nil, pass: 2 }
+OptionParser.new do |parser|
+  parser.banner = "usage: tools/compile_smoke <version> [outdir] [--platform NAME] [--pass 1|2]"
+  parser.on("--platform NAME", "linux-gnu | linux-musl | msys (default: host)") { |v| options[:platform] = v }
+  parser.on("--pass N", Integer, "GNUmakefile.in pass variant, 1 or 2 (default: 2, final build)") { |v| options[:pass] = v }
+end.parse!
+
+version = ARGV[0] or abort "usage: tools/compile_smoke <version> [outdir] [--platform NAME] [--pass 1|2]"
+outdir = File.expand_path(ARGV[1] || "build/compile-smoke")
+platform = options[:platform] || native_platform
+config = PLATFORM_CONFIG.fetch(platform) { abort "tools/compile_smoke: no toolchain config for platform #{platform.inspect}" }
+cache_dir = ENV.fetch("TFS_CACHE_DIR", Tfs::SourcePrep::DEFAULT_CACHE_DIR)
+
+selection = Tfs::PatchSelection.new
+patches = selection.for(version, platform: platform, pass: options[:pass])
+objects = patches.map(&:target_file)
+                 .select { |target| target.end_with?(".c") }
+                 .map { |target| INCLUDED_C.fetch(target, target.sub(/\.c\z/, ".o")) }
+                 .uniq
+abort "tools/compile_smoke: no patched translation units for #{version} (#{platform})" if objects.empty?
+
+FileUtils.mkdir_p(outdir)
+prep = Tfs::SourcePrep.new(versions: Tfs::Versions.new,
+                           selection: selection,
+                           cache_dir: cache_dir)
+src = prep.prepare(version, outdir, platform: platform, pass: options[:pass])
+
+env = config["env"].merge("CPPFLAGS" => "-I#{STUB_INCLUDE}")
+configure = File.join(src, "configure")
+out, err, status = Open3.capture3(env, configure, "--disable-install-doc", *config["configure"], chdir: src)
+unless status.success?
+  tail = (out.lines + err.lines).last(25).join
+  abort "tools/compile_smoke: configure failed for #{version} (#{platform})\n#{tail}"
+end
+
+failed = objects.reject do |object|
+  _out, _err, status = Open3.capture3("make", object, chdir: src)
+  status.success?
+end
+abort "tools/compile_smoke: FAIL #{version} (#{platform}): #{failed.join(', ')} did not compile" unless failed.empty?
+
+puts "OK #{version} (#{platform}, pass#{options[:pass]}): #{objects.size} patched translation units compile (#{objects.join(', ')})"

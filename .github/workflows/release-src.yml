@@ -24,6 +24,59 @@ jobs:
       - id: emit
         run: echo "matrix=$(tools/versions --scenarios)" >> "$GITHUB_OUTPUT"
 
+  changes:
+    name: map changed patch lines to compile-smoke legs
+    runs-on: ubuntu-latest
+    outputs:
+      matrix: ${{ steps.emit.outputs.matrix }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: fetch tags (previous-release diff base)
+        run: git fetch --tags --force
+      - uses: ruby/setup-ruby@v1
+        with:
+          ruby-version: "3.2"
+      - id: emit
+        run: echo "matrix=$(tools/smoke_matrix "${{ github.event_name == 'push' && github.ref_name || inputs.release_tag }}")" >> "$GITHUB_OUTPUT"
+
+  # Publish gate (roadmap 17.0; the v0.2.8 lesson: a patch release shipped
+  # apply-clean but uncompilable and broke every linux runtime leg). For
+  # every line whose patch set changed in the tag (tools/smoke_matrix diffs
+  # the tag against the previous release tag), configure the tree and
+  # compile each patched translation unit of the line's NEWEST version per
+  # shipped scenario -- a representative per-line leg, not per-version:
+  # patches are line-wide, so per-version legs would multiply configure
+  # runs for no extra signal. The compile is the cheapest that catches a
+  # broken shim: ./configure + make <obj> per patched .c (objects only --
+  # no runtime build, no link, no exts), against the vendored stub tebako
+  # headers in ci/include. msys legs compile at pass 2 (the pass split
+  # selects GNUmakefile variants; no patched .c differs between passes).
+  # With no changed patch set the matrix is empty and the gate is vacuous;
+  # publish's if: below treats that (skipped) as pass, failure as block.
+  compile-smoke:
+    name: compile-smoke ${{ matrix.version }} (${{ matrix.platform }})
+    needs: changes
+    strategy:
+      fail-fast: false
+      matrix: ${{ fromJSON(needs.changes.outputs.matrix) }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: ruby/setup-ruby@v1
+        with:
+          ruby-version: "3.2"
+      - name: scenario toolchain
+        run: |
+          sudo apt-get update -qq
+          case "${{ matrix.platform }}" in
+            linux-musl) sudo apt-get install -y -qq musl-tools ;;
+            msys) sudo apt-get install -y -qq gcc-mingw-w64-x86-64 ;;
+          esac
+      - name: configure + compile patched translation units
+        run: tools/compile_smoke "${{ matrix.version }}" "$PWD/build/compile-smoke" --platform "${{ matrix.platform }}"
+
   build:
     name: tfs-ruby-${{ matrix.version }}-src${{ matrix.suffix }}
     needs: versions
@@ -60,7 +113,12 @@ jobs:
 
   publish:
     name: publish release
-    needs: build
+    needs: [build, compile-smoke, changes]
+    # compile-smoke runs legs only for changed patch lines; with no changed
+    # patch set its matrix is empty (result skipped/success -- vacuous
+    # pass). Publish only when the leg map was computed, every build leg
+    # passed, and no smoke leg failed or was cancelled.
+    if: ${{ always() && needs.build.result == 'success' && needs.changes.result == 'success' && (needs.compile-smoke.result == 'success' || needs.compile-smoke.result == 'skipped') }}
     runs-on: ubuntu-latest
     permissions:
       contents: write
