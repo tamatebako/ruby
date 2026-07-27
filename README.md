@@ -120,8 +120,13 @@ packaging host. Canonical patches carry the literal placeholder
   `plain = 1` substitution matches only ruby 3.1; the `win32/win32.c` tebako
   include anchor (`_MSC_VER <= 1200`) is gone in ruby 4.0;
   `ext/io/console/win32_vk.inc` was fixed upstream in ruby 3.4+.
-- Dead gem code not converted: `FILE_C_MSYS_PATCH`, `LINUX_PATCHES`
-  (`ext/extmk.rb`) — defined but never referenced.
+- Dead gem code: `FILE_C_MSYS_PATCH` (msys `File#flock` returning ENOTSUP
+  for memfs fds) was never referenced by the gem; it is re-implemented with
+  corrected semantics in the `_WIN32` branch of
+  `file_c_tebako_includes.patch` (`tfs_flock`: locks on memfs fds
+  no-op-succeed, matching the POSIX fcntl-lock shim semantics — roadmap
+  item 18). `LINUX_PATCHES` (`ext/extmk.rb`) stays unconverted (defined but
+  never referenced).
 
 ## Tooling (`tools/`)
 

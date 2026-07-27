@@ -15,12 +15,15 @@
 # hunk hooks statx for in-mount paths/embedded fds (the memfs carries no
 # birthtime: STATX_BTIME stays out of the mask, so birthtime comes back
 # unsupported -- never ENOENT).
+# On msys the block also hooks flock: File#flock on a memfs fd
+# no-op-succeeds (the read-only memfs is process-local; the legacy msys
+# patch returned ENOTSUP there -- regression note in the hunk).
 # X-Redesign: modern-api
 diff --git a/file.c b/file.c
 index 373788b..4da03d0 100644
 --- a/file.c
 +++ b/file.c
-@@ -93,6 +93,166 @@ int flock(int, int);
+@@ -93,6 +93,180 @@ int flock(int, int);
  # define lstat stat
  #endif
  
@@ -161,6 +164,19 @@ index 373788b..4da03d0 100644
 +    }
 +    return rb_w32_fstati128(fd, st);
 +}
++
++/* File#flock on a memfs fd: the memfs is read-only and process-local, so
++   lock operations are no-ops that succeed -- the POSIX fcntl-lock shim
++   semantics from the tfs_fcntl work. Regression note: the legacy msys
++   patch returned ENOTSUP from rb_file_flock for memfs fds (tebako gem
++   FILE_C_MSYS_PATCH), surfacing as Errno::ENOTSUP on File#flock against
++   memfs paths; host fds pass through to the CRT flock unchanged. */
++static int
++tfs_flock(int fd, int oper)
++{
++    if (tebako_fd_is_embedded(fd)) return 0;
++    return flock(fd, oper);
++}
 +#endif /* _WIN32 */
 +#pragma pop_macro("stat")
 +
@@ -181,13 +197,14 @@ index 373788b..4da03d0 100644
 +#define rb_w32_ulstati128(...) tfs_ulstati128(__VA_ARGS__)
 +#define rb_w32_uaccess(...) tfs_uaccess(__VA_ARGS__)
 +#define rb_w32_fstati128(...) tfs_fstati128(__VA_ARGS__)
++#define flock(...) tfs_flock(__VA_ARGS__)
 +#endif /* _WIN32 */
 +/* -- End of tebako patch -- */
 +
  /* define system APIs */
  #ifdef _WIN32
  # include "win32/file.h"
-@@ -1191,7 +1351,52 @@ statx(int dirfd, const char *pathname, int flags,
+@@ -1191,7 +1365,52 @@ statx(int dirfd, const char *pathname, int flags,
  }
  #   endif /* __linux__ */
  # endif /* HAVE_STATX */
