@@ -11,12 +11,19 @@
 # lstat is served by stat (no symlink notion in the c_api). On msys the
 # routing hooks the rb_w32_* layer and converts the CRT struct stat the
 # c_api fills to ruby's stati128.
+# ruby 3.x on linux routes File.birthtime through statx(2), so a second
+# hunk hooks statx for in-mount paths/embedded fds (the memfs carries no
+# birthtime: STATX_BTIME stays out of the mask, so birthtime comes back
+# unsupported -- never ENOENT).
+# On msys the block also hooks flock: File#flock on a memfs fd
+# no-op-succeeds (the read-only memfs is process-local; the legacy msys
+# patch returned ENOTSUP there -- regression note in the hunk).
 # X-Redesign: modern-api
 diff --git a/file.c b/file.c
 index 3a8439e..2871043 100644
 --- a/file.c
 +++ b/file.c
-@@ -93,6 +93,166 @@ int flock(int, int);
+@@ -93,6 +93,180 @@ int flock(int, int);
  # define lstat stat
  #endif
  
@@ -157,6 +164,19 @@ index 3a8439e..2871043 100644
 +    }
 +    return rb_w32_fstati128(fd, st);
 +}
++
++/* File#flock on a memfs fd: the memfs is read-only and process-local, so
++   lock operations are no-ops that succeed -- the POSIX fcntl-lock shim
++   semantics from the tfs_fcntl work. Regression note: the legacy msys
++   patch returned ENOTSUP from rb_file_flock for memfs fds (tebako gem
++   FILE_C_MSYS_PATCH), surfacing as Errno::ENOTSUP on File#flock against
++   memfs paths; host fds pass through to the CRT flock unchanged. */
++static int
++tfs_flock(int fd, int oper)
++{
++    if (tebako_fd_is_embedded(fd)) return 0;
++    return flock(fd, oper);
++}
 +#endif /* _WIN32 */
 +#pragma pop_macro("stat")
 +
@@ -177,9 +197,63 @@ index 3a8439e..2871043 100644
 +#define rb_w32_ulstati128(...) tfs_ulstati128(__VA_ARGS__)
 +#define rb_w32_uaccess(...) tfs_uaccess(__VA_ARGS__)
 +#define rb_w32_fstati128(...) tfs_fstati128(__VA_ARGS__)
++#define flock(...) tfs_flock(__VA_ARGS__)
 +#endif /* _WIN32 */
 +/* -- End of tebako patch -- */
 +
  /* define system APIs */
  #ifdef _WIN32
  # include "win32/file.h"
+@@ -1191,7 +1365,52 @@ statx(int dirfd, const char *pathname, int flags,
+ }
+ #   endif
+ # endif
+ 
++/* -- Start of tebako patch -- */
++/* ruby 3.x on linux routes File.birthtime through statx(2): fill the
++   caller's struct statx from the memfs for in-mount paths (and from
++   tebako_fs_fstat for embedded fds); everything else passes to the host.
++   The memfs carries no birthtime, so STATX_BTIME stays out of the mask
++   (File::Stat#birthtime raises NotImplementedError, like any fs without
++   btime).
++   NOTE: tebako_fd_is_embedded is a TEBAKO_FD_FLAG (0x40000000) bit check,
++   and AT_FDCWD (-100) has that bit set — the fd branch must be gated on
++   dirfd >= 0 or every host statx(AT_FDCWD, ...) would be misrouted into
++   the memfs and fail EBADF (breaks rbinstall at build time). */
++static void
++tfs_stat_to_statx(const struct stat *i, struct statx *o)
++{
++    memset(o, 0, sizeof(*o));
++    o->stx_mask = STATX_BASIC_STATS;
++    o->stx_mode = i->st_mode;
++    o->stx_nlink = i->st_nlink;
++    o->stx_uid = i->st_uid;
++    o->stx_gid = i->st_gid;
++    o->stx_ino = i->st_ino;
++    o->stx_size = i->st_size;
++    o->stx_mtime.tv_sec = i->st_mtime;
++}
++
++static int
++tfs_statx(int dirfd, const char *pathname, int flags, unsigned int mask, struct statx *statxbuf)
++{
++    struct stat st;
++    if ((dirfd == AT_FDCWD || (pathname != NULL && pathname[0] == '/')) &&
++        tfs_memfs_path_p(pathname)) {
++        if (tebako_fs_stat(pathname, &st) != 0) return -1;
++        tfs_stat_to_statx(&st, statxbuf);
++        return 0;
++    }
++    if (dirfd >= 0 && tebako_fd_is_embedded(dirfd)) {
++        if (tebako_fs_fstat(dirfd, &st) != 0) return -1;
++        tfs_stat_to_statx(&st, statxbuf);
++        return 0;
++    }
++    return statx(dirfd, pathname, flags, mask, statxbuf);
++}
++#define statx(...) tfs_statx(__VA_ARGS__)
++/* -- End of tebako patch -- */
++
+ typedef struct no_gvl_statx_data {
+     struct statx *stx;
+     int fd;

@@ -13,12 +13,15 @@
 # c_api fills to ruby's stati128.
 # ruby 4.0 on linux routes File.stat/lstat/IO#stat through statx(2),
 # so a second hunk hooks statx for in-mount paths/embedded fds.
+# On msys the block also hooks flock: File#flock on a memfs fd
+# no-op-succeeds (the read-only memfs is process-local; the legacy msys
+# patch returned ENOTSUP there -- regression note in the hunk).
 # X-Redesign: modern-api
 diff --git a/file.c b/file.c
 index 89294ea..9bab75a 100644
 --- a/file.c
 +++ b/file.c
-@@ -94,6 +94,166 @@ int flock(int, int);
+@@ -94,6 +94,180 @@ int flock(int, int);
  # define lstat stat
  #endif
  
@@ -159,6 +162,19 @@ index 89294ea..9bab75a 100644
 +    }
 +    return rb_w32_fstati128(fd, st);
 +}
++
++/* File#flock on a memfs fd: the memfs is read-only and process-local, so
++   lock operations are no-ops that succeed -- the POSIX fcntl-lock shim
++   semantics from the tfs_fcntl work. Regression note: the legacy msys
++   patch returned ENOTSUP from rb_file_flock for memfs fds (tebako gem
++   FILE_C_MSYS_PATCH), surfacing as Errno::ENOTSUP on File#flock against
++   memfs paths; host fds pass through to the CRT flock unchanged. */
++static int
++tfs_flock(int fd, int oper)
++{
++    if (tebako_fd_is_embedded(fd)) return 0;
++    return flock(fd, oper);
++}
 +#endif /* _WIN32 */
 +#pragma pop_macro("stat")
 +
@@ -179,6 +195,7 @@ index 89294ea..9bab75a 100644
 +#define rb_w32_ulstati128(...) tfs_ulstati128(__VA_ARGS__)
 +#define rb_w32_uaccess(...) tfs_uaccess(__VA_ARGS__)
 +#define rb_w32_fstati128(...) tfs_fstati128(__VA_ARGS__)
++#define flock(...) tfs_flock(__VA_ARGS__)
 +#endif /* _WIN32 */
 +/* -- End of tebako patch -- */
 +

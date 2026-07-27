@@ -120,8 +120,13 @@ packaging host. Canonical patches carry the literal placeholder
   `plain = 1` substitution matches only ruby 3.1; the `win32/win32.c` tebako
   include anchor (`_MSC_VER <= 1200`) is gone in ruby 4.0;
   `ext/io/console/win32_vk.inc` was fixed upstream in ruby 3.4+.
-- Dead gem code not converted: `FILE_C_MSYS_PATCH`, `LINUX_PATCHES`
-  (`ext/extmk.rb`) — defined but never referenced.
+- Dead gem code: `FILE_C_MSYS_PATCH` (msys `File#flock` returning ENOTSUP
+  for memfs fds) was never referenced by the gem; it is re-implemented with
+  corrected semantics in the `_WIN32` branch of
+  `file_c_tebako_includes.patch` (`tfs_flock`: locks on memfs fds
+  no-op-succeed, matching the POSIX fcntl-lock shim semantics — roadmap
+  item 18). `LINUX_PATCHES` (`ext/extmk.rb`) stays unconverted (defined but
+  never referenced).
 
 ## Tooling (`tools/`)
 
@@ -167,6 +172,22 @@ wires children with `autoload`):
   overlay forward, and lints the whole set with `git apply --check`
   against the sha256-verified tarball. On any failure every touched file
   is restored — nothing is released silently.
+- `tools/smoke_matrix <release-tag>` — prints the release-src
+  compile-smoke matrix: one leg per (changed patch line × scenario) using
+  the newest version of each line whose `patches/<line>/` folder changed
+  since the previous release tag (all lines when there is none).
+- `tools/compile_smoke <version> [outdir] [--platform NAME] [--pass 1|2]` —
+  the release-src compile gate. Applies the version's patch set for one
+  scenario, configures the tree, and compiles every translation unit the
+  selected patches touch (`make <obj>` per patched `.c`; sources that are
+  `#include`d into another TU — `thread_pthread.c`, `thread_win32.c`,
+  `prism_compile.c` — are compiled through their including object). The
+  patched TUs resolve the tebako memfs headers from the vendored
+  compile-smoke stubs in `ci/include` (they declare exactly the c_api
+  surface the patches use, mirroring the real libtfs headers). Toolchains:
+  linux-gnu native cc, linux-musl `musl-gcc`, msys the
+  `x86_64-w64-mingw32` cross gcc. Fails named:
+  `FAIL <version> (<platform>): <objects> did not compile`.
 
 CI: `.github/workflows/lint-patches.yml` lints every version on a matrix
 generated from versions.yml; `.github/workflows/release-src.yml` (tags
@@ -175,7 +196,12 @@ generated from versions.yml; `.github/workflows/release-src.yml` (tags
 scenario matrix (`linux-gnu` stays the unsuffixed back-compat asset; msys
 ships `-msys-pass1`/`-msys-pass2`), verifies each artifact against the
 apply output, and publishes the tarballs plus a `SHA256SUMS` to the
-release; `.github/workflows/release-monitor.yml`
+release. Publish is gated on the compile-smoke matrix (roadmap 17.0; the
+v0.2.8 lesson — a patch release shipped apply-clean but uncompilable and
+broke every linux runtime leg): one representative leg per changed patch
+line × scenario (newest version of the line), each compiling the patched
+translation units far enough to catch a broken shim — no full runtime
+build. `.github/workflows/release-monitor.yml`
 (daily 06:17 UTC + manual dispatch) detects new official ruby releases and
 onboards each on its own lane: a clean onboard opens an
 "Onboard ruby X.Y.Z" pull request (peter-evans/create-pull-request), a
