@@ -16,7 +16,7 @@ diff --git a/io.c b/io.c
 index 3a704fa..4764405 100644
 --- a/io.c
 +++ b/io.c
-@@ -169,10 +169,159 @@ off_t __syscall(quad_t number, ...);
+@@ -169,10 +169,174 @@ off_t __syscall(quad_t number, ...);
  
  #define IO_MAX_BUFFER_GROWTH 8 * 1024 * 1024 // 8MB
  
@@ -164,8 +164,23 @@ index 3a704fa..4764405 100644
 +
 +#define rb_w32_read(...) tfs_read(__VA_ARGS__)
 +#define rb_w32_lseek(...) tfs_lseek(__VA_ARGS__)
++/* rb_w32_fd_is_text reads the CRT fd table (_osfile) indexed by a real CRT
++   fd; a libtfs token (fd | TEBAKO_FD_FLAG) indexes it far out of bounds and
++   segfaults -- the CRLF set_binary_mode_with_seek_cur path of a
++   length-capped read (File.binread(path, n)) hits it. The memfs fd has no
++   CRT entry: report binary, the truthful mode for image content. */
++static int
++tfs_fd_is_text(int fd)
++{
++    if (tebako_fd_is_embedded(fd)) {
++        return 0;
++    }
++    return rb_w32_fd_is_text(fd);
++}
++
 +#define rb_w32_close(...) tfs_close(__VA_ARGS__)
 +#define rb_w32_fstati128(...) tfs_fstati128(__VA_ARGS__)
++#define rb_w32_fd_is_text(...) tfs_fd_is_text(__VA_ARGS__)
 +#define fcntl(...) tfs_fcntl(__VA_ARGS__)
 +/* -- End of tebako patch -- */
 +
