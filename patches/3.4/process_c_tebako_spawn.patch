@@ -14,7 +14,7 @@
 # (malloc/extract) never runs in the async-signal-safe child.
 # X-Redesign: v2-spawn
 diff --git a/process.c b/process.c
-index aff3503..443c7f8 100644
+index aff3503..b0f32f4 100644
 --- a/process.c
 +++ b/process.c
 @@ -2746,6 +2746,63 @@ rb_execarg_get(VALUE execarg_obj)
@@ -51,7 +51,7 @@ index aff3503..443c7f8 100644
 +#if defined(__APPLE__)
 +    preload = tebako_fs_dlmap2file("/lib/tebako/libtfs_preload.dylib");
 +    if (preload != NULL) {
-+        if (NIL_P(eargp->env_modification)) eargp->env_modification = rb_hash_new();
++        if (!RB_TYPE_P(eargp->env_modification, T_HASH)) eargp->env_modification = rb_hash_new();
 +        rb_hash_aset(eargp->env_modification,
 +                     rb_str_new_cstr("DYLD_INSERT_LIBRARIES"),
 +                     rb_str_new_cstr(preload));
@@ -60,7 +60,7 @@ index aff3503..443c7f8 100644
 +#else
 +    preload = tebako_fs_dlmap2file("/lib/tebako/libtfs_preload.so");
 +    if (preload != NULL) {
-+        if (NIL_P(eargp->env_modification)) eargp->env_modification = rb_hash_new();
++        if (!RB_TYPE_P(eargp->env_modification, T_HASH)) eargp->env_modification = rb_hash_new();
 +        rb_hash_aset(eargp->env_modification,
 +                     rb_str_new_cstr("LD_PRELOAD"),
 +                     rb_str_new_cstr(preload));
@@ -69,7 +69,7 @@ index aff3503..443c7f8 100644
 +#endif
 +    mounts = tebako_fs_mounts();
 +    if (mounts != NULL) {
-+        if (NIL_P(eargp->env_modification)) eargp->env_modification = rb_hash_new();
++        if (!RB_TYPE_P(eargp->env_modification, T_HASH)) eargp->env_modification = rb_hash_new();
 +        rb_hash_aset(eargp->env_modification,
 +                     rb_str_new_cstr("TEBAKO_TFS_MOUNTS"),
 +                     rb_str_new_cstr(mounts));
