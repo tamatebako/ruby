@@ -30,10 +30,6 @@ patches:
     version: "10"
   - feature: rubygems_openssl_require
     file: ../3.1/rubygems_openssl_require.patch
-  - feature: rubygems_path_support
-    file: ../3.3/rubygems_path_support.patch
-  - feature: rubygems_path_support_msys
-    file: ../3.3/rubygems_path_support_msys.patch
   - feature: thread_pthread_main_stack_musl
     file: thread_pthread_main_stack_musl.patch
   - feature: winmain_c_wwinmain_msys
