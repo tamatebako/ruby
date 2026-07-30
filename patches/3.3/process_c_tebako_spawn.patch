@@ -5,19 +5,24 @@
 #
 # Spawn of a memfs-resident binary: the kernel never sees the memfs, so
 # an exec target HELD by the mounts (tebako_path_is_embedded) is
-# materialized to the host cache (tebako_fs_dlmap2file) and the child
-# re-enters the namespace through the preload shim
-# (DYLD_INSERT_LIBRARIES/LD_PRELOAD) plus the current mounts
-# (TEBAKO_TFS_MOUNTS). Host targets pass through untouched; a covered
-# path the mounts do not hold answers ENOENT and exec fails honestly.
+# materialized to the host cache (tebako_fs_dlmap2file) and the exec
+# pair (command_name, command_abspath — the child execve()s
+# command_abspath) is pointed at the host copy. The child re-enters the
+# namespace through the preload shim (DYLD_INSERT_LIBRARIES/LD_PRELOAD)
+# plus the current mounts (TEBAKO_TFS_MOUNTS), injected via
+# env_modification in ruby's internal representation (hidden array of
+# hidden [key, val] pairs — a hash here crashes parent_start1).
+# Host targets pass through untouched; a covered path the mounts do not
+# hold answers ENOENT and exec fails honestly. Shell-form spawns and
+# bare command names (PATH search) do not resolve through the VFS.
 # The hook is parent-side (before fork), so the materialization work
 # (malloc/extract) never runs in the async-signal-safe child.
 # X-Redesign: v2-spawn
 diff --git a/process.c b/process.c
-index aff3503..529b906 100644
+index aff3503..aff3ba4 100644
 --- a/process.c
 +++ b/process.c
-@@ -2746,6 +2746,63 @@ rb_execarg_get(VALUE execarg_obj)
+@@ -2746,6 +2746,81 @@ rb_execarg_get(VALUE execarg_obj)
      return eargp;
  }
  
@@ -26,9 +31,31 @@ index aff3503..529b906 100644
 +#include <tebako/fs/c_api.h>     /* modern libtfs C API (tebako_fs_*) */
 +#include <stdlib.h>              /* free */
 +
++#ifndef _WIN32
++/* Push KEY=VAL into eargp->env_modification using ruby's internal
++   representation: a hidden array of hidden [key, val] pairs (see
++   check_exec_env_i).  rb_execarg_parent_start1 applies pairs in order
++   via st_insert, so a later pair for the same key wins — the mounts
++   list and the preload path are authoritative for the child. */
++static void
++tfs_env_set(struct rb_execarg *eargp, const char *key, const char *val)
++{
++    VALUE env = eargp->env_modification;
++    if (!RB_TYPE_P(env, T_ARRAY)) {
++        env = hide_obj(rb_ary_new());
++        eargp->env_modification = env;
++    }
++    rb_ary_push(env, hide_obj(rb_assoc_new(EXPORT_STR(rb_str_new_cstr(key)),
++                                           EXPORT_STR(rb_str_new_cstr(val)))));
++}
++
 +/* Spawn of a memfs-resident binary: materialize the exec target to the
-+   host cache and put the preload shim + the current mounts into the
-+   child's environment so its own IO resolves through the VFS. */
++   host cache, point command_abspath at it (the child execve()s
++   command_abspath; command_name follows for error reporting), and put
++   the preload shim + the current mounts into the child's environment so
++   its own IO resolves through the VFS.  Shell-form spawns and bare
++   command names (PATH search) do not resolve through the VFS — spawn
++   with an absolute in-VFS path. */
 +static void
 +tfs_spawn_prepare(struct rb_execarg *eargp)
 +{
@@ -43,45 +70,41 @@ index aff3503..529b906 100644
 +    mapped = tebako_fs_dlmap2file(prog);
 +    if (mapped == NULL) return;  /* covered but not held: a host path — exec answers honestly */
 +    eargp->invoke.cmd.command_name = rb_str_new_cstr(mapped);
++    eargp->invoke.cmd.command_abspath = rb_str_new_cstr(mapped);
 +    free(mapped);
 +
-+    /* The preload shim rides the runtime's own image (/lib/tebako/...);
-+       its absence only means an older runtime image — the exec proceeds
-+       without VFS, answering honestly for paths the host lacks. */
++    /* The preload shim rides the runtime's own env image (/lib/tebako/...
++       under the memfs root); its absence only means an older runtime
++       image — the exec proceeds without VFS, answering honestly for
++       paths the host lacks. */
 +#if defined(__APPLE__)
-+    preload = tebako_fs_dlmap2file("/lib/tebako/libtfs_preload.dylib");
++    preload = tebako_fs_dlmap2file("/__tebako_memfs__/lib/tebako/libtfs_preload.dylib");
 +    if (preload != NULL) {
-+        if (!RB_TYPE_P(eargp->env_modification, T_HASH)) eargp->env_modification = rb_hash_new();
-+        rb_hash_aset(eargp->env_modification,
-+                     rb_str_new_cstr("DYLD_INSERT_LIBRARIES"),
-+                     rb_str_new_cstr(preload));
++        tfs_env_set(eargp, "DYLD_INSERT_LIBRARIES", preload);
 +        free(preload);
 +    }
 +#else
-+    preload = tebako_fs_dlmap2file("/lib/tebako/libtfs_preload.so");
++    preload = tebako_fs_dlmap2file("/__tebako_memfs__/lib/tebako/libtfs_preload.so");
 +    if (preload != NULL) {
-+        if (!RB_TYPE_P(eargp->env_modification, T_HASH)) eargp->env_modification = rb_hash_new();
-+        rb_hash_aset(eargp->env_modification,
-+                     rb_str_new_cstr("LD_PRELOAD"),
-+                     rb_str_new_cstr(preload));
++        tfs_env_set(eargp, "LD_PRELOAD", preload);
 +        free(preload);
 +    }
 +#endif
 +    mounts = tebako_fs_mounts();
 +    if (mounts != NULL) {
-+        if (!RB_TYPE_P(eargp->env_modification, T_HASH)) eargp->env_modification = rb_hash_new();
-+        rb_hash_aset(eargp->env_modification,
-+                     rb_str_new_cstr("TEBAKO_TFS_MOUNTS"),
-+                     rb_str_new_cstr(mounts));
++        tfs_env_set(eargp, "TEBAKO_TFS_MOUNTS", mounts);
 +        free(mounts);
 +    }
 +}
++#else
++#define tfs_spawn_prepare(eargp) ((void)0)
++#endif
 +/* -- End of tebako patch -- */
 +
  static VALUE
  rb_execarg_init(int argc, const VALUE *orig_argv, int accept_shell, VALUE execarg_obj)
  {
-@@ -2758,6 +2815,9 @@ rb_execarg_init(int argc, const VALUE *orig_argv, int accept_shell, VALUE execar
+@@ -2758,6 +2833,9 @@ rb_execarg_init(int argc, const VALUE *orig_argv, int accept_shell, VALUE execar
      prog = rb_exec_getargs(&argc, &argv, accept_shell, &env, &opthash);
      rb_exec_fillarg(prog, argc, argv, env, opthash, execarg_obj);
      ALLOCV_END(argv_buf);
