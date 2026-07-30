@@ -16,13 +16,14 @@ diff --git a/prism_compile.c b/prism_compile.c
 index c000b66..8bdb4d1 100644
 --- a/prism_compile.c
 +++ b/prism_compile.c
-@@ -1,6 +1,79 @@
+@@ -1,6 +1,80 @@
  #include "prism.h"
  #include "version.h"
  
 +/* -- Start of tebako patch -- */
 +#include <tebako/tebako-main.h> /* tebako_mount_point(): the compiled-in fs_mount_point */
 +#include <string.h>               /* strlen/strncmp/memset/memcpy used below */
++#include <errno.h>                /* ENOENT for the host-passthrough fall-through */
 +#include <fcntl.h>                /* O_RDONLY (not transitive on mingw) */
 +
 +/* ruby/win32.h maps 'stat' onto stati128 on _WIN32; the libtfs C API fills
@@ -31,17 +32,17 @@ index c000b66..8bdb4d1 100644
 +#undef stat
 +#include <tebako/fs/c_api.h>     /* modern libtfs C API (tebako_fs_*) */
 +
-+/* Route check: is path inside the memfs mount? (mount-point prefix check vs
-+   the compiled-in fs_mount_point; the memfs is read-only -- writes/cwd go to
-+   the host fs unchanged) */
++/* Route check: does the TFS mount table claim this path? (v2 multi-mount:
++   the driver mounts the env image at the runtime root AND each payload at
++   its declared point, so the v1 mount-point prefix check is replaced by the
++   c_api coverage query. A covered path the mounts do not hold answers
++   ENOENT from the c_api -- jail-gated host passthrough -- and pm_read_file
++   then serves it from the host.) */
 +static int
 +tfs_memfs_path_p(const char *path)
 +{
-+    const char *mount = tebako_mount_point();
-+    size_t mount_len;
-+    if (path == NULL || mount == NULL) return 0;
-+    mount_len = strlen(mount);
-+    return strncmp(path, mount, mount_len) == 0;
++    if (path == NULL) return 0;
++    return tebako_path_is_embedded(path);
 +}
 +
 +/* Read a source file from the read-only memfs, composed on the modern c_api
@@ -96,7 +97,7 @@ index c000b66..8bdb4d1 100644
  /**
   * This compiler defines its own concept of the location of a node. We do this
   * because we want to pair line information with node identifier so that we can
-@@ -11281,7 +11354,18 @@ pm_read_file(pm_string_t *string, const char *filepath)
+@@ -11281,7 +11354,24 @@ pm_read_file(pm_string_t *string, const char *filepath)
  VALUE
  pm_load_file(pm_parse_result_t *result, VALUE filepath, bool load_error)
  {
@@ -106,6 +107,12 @@ index c000b66..8bdb4d1 100644
 +    if (tfs_memfs_path_p(RSTRING_PTR(filepath)))
 +    {
 +      init_result = tfs_string_file_init(&result->input, RSTRING_PTR(filepath));
++      /* covered but not held (ENOENT): a host path the "/" mount happens to
++         cover -- read it from the host fs like any non-mounted path */
++      if (init_result == PM_STRING_INIT_ERROR_GENERIC && tebako_get_errno() == ENOENT)
++      {
++        init_result = pm_read_file(&result->input, RSTRING_PTR(filepath));
++      }
 +    }
 +    else
 +    {
