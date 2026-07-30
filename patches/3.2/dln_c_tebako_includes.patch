@@ -14,25 +14,26 @@ diff --git a/dln.c b/dln.c
 index 0edd709..b2fed05 100644
 --- a/dln.c
 +++ b/dln.c
-@@ -76,7 +76,32 @@ void *xrealloc();
+@@ -76,7 +76,33 @@ void *xrealloc();
  # include <unistd.h>
  #endif
  
 +/* -- Start of tebako patch -- */
 +#include <tebako/tebako-main.h> /* tebako_mount_point(): the compiled-in fs_mount_point */
 +#include <string.h>               /* strlen/strncmp/memset/memcpy used below */
++#include <errno.h>                /* ENOENT for the host-passthrough fall-through */
 +
-+/* Route check: is path inside the memfs mount? (mount-point prefix check vs
-+   the compiled-in fs_mount_point; the memfs is read-only -- writes/cwd go to
-+   the host fs unchanged) */
++/* Route check: does the TFS mount table claim this path? (v2 multi-mount:
++   the driver mounts the env image at the runtime root AND each payload at
++   its declared point, so the v1 mount-point prefix check is replaced by the
++   c_api coverage query. A covered path the mounts do not hold answers
++   ENOENT from the c_api -- jail-gated host passthrough -- and the raw
++   dlopen below then serves it from the host.) */
 +static int
 +tfs_memfs_path_p(const char *path)
 +{
-+    const char *mount = tebako_mount_point();
-+    size_t mount_len;
-+    if (path == NULL || mount == NULL) return 0;
-+    mount_len = strlen(mount);
-+    return strncmp(path, mount, mount_len) == 0;
++    if (path == NULL) return 0;
++    return tebako_path_is_embedded(path);
 +}
 +
 +/* libtfs c_api extension (requested): tebako_fs_dlmap2file -- extract a
@@ -47,7 +48,7 @@ index 0edd709..b2fed05 100644
  static void
  dln_loaderror(const char *format, ...)
  {
-@@ -374,7 +399,22 @@ dln_open(const char *file)
+@@ -374,7 +399,29 @@ dln_open(const char *file)
  # endif
  
      /* Load file */
@@ -57,12 +58,19 @@ index 0edd709..b2fed05 100644
 +        /* memfs-resident extension: map to a host file via the libtfs c_api
 +           (extension requested: tebako_fs_dlmap2file) and dlopen that */
 +        char *mapped = tebako_fs_dlmap2file(file);
-+        if (mapped == NULL) {
++        if (mapped != NULL) {
++            handle = dlopen(mapped, RTLD_LAZY|RTLD_GLOBAL);
++            free(mapped);
++        }
++        else if (errno == ENOENT) {
++            /* covered but not held: a host path the "/" mount happens to
++               cover -- the raw dlopen below serves it from the host */
++            handle = dlopen(file, RTLD_LAZY|RTLD_GLOBAL);
++        }
++        else {
 +            error = "cannot map a memfs-resident library to a host file";
 +            goto failed;
 +        }
-+        handle = dlopen(mapped, RTLD_LAZY|RTLD_GLOBAL);
-+        free(mapped);
 +    }
 +    else {
 +        handle = dlopen(file, RTLD_LAZY|RTLD_GLOBAL);
