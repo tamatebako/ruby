@@ -21,13 +21,14 @@ diff --git a/file.c b/file.c
 index 89294ea..9bab75a 100644
 --- a/file.c
 +++ b/file.c
-@@ -94,6 +94,180 @@ int flock(int, int);
+@@ -94,6 +94,189 @@ int flock(int, int);
  # define lstat stat
  #endif
  
 +/* -- Start of tebako patch -- */
 +#include <tebako/tebako-main.h> /* tebako_mount_point(): the compiled-in fs_mount_point */
 +#include <string.h>               /* strlen/strncmp/memset/memcpy used below */
++#include <errno.h>                /* ENOENT for the host-passthrough fall-through */
 +
 +/* ruby/win32.h maps 'stat' onto stati128 on _WIN32; the libtfs C API fills
 +   the CRT struct stat, so keep the plain name visible inside this block */
@@ -35,24 +36,27 @@ index 89294ea..9bab75a 100644
 +#undef stat
 +#include <tebako/fs/c_api.h>     /* modern libtfs C API (tebako_fs_*) */
 +
-+/* Route check: is path inside the memfs mount? (mount-point prefix check vs
-+   the compiled-in fs_mount_point; the memfs is read-only -- writes/cwd go to
-+   the host fs unchanged) */
++/* Route check: does the TFS mount table claim this path? (v2 multi-mount:
++   the driver mounts the env image at the runtime root AND each payload at
++   its declared point, so the v1 mount-point prefix check is replaced by the
++   c_api coverage query. A covered path the mounts do not hold answers
++   ENOENT from the c_api -- jail-gated host passthrough -- and the wrappers
++   below pass it through to the host fs.) */
 +static int
 +tfs_memfs_path_p(const char *path)
 +{
-+    const char *mount = tebako_mount_point();
-+    size_t mount_len;
-+    if (path == NULL || mount == NULL) return 0;
-+    mount_len = strlen(mount);
-+    return strncmp(path, mount, mount_len) == 0;
++    if (path == NULL) return 0;
++    return tebako_path_is_embedded(path);
 +}
 +
 +#ifndef _WIN32
 +static int
 +tfs_stat(const char *path, struct stat *st)
 +{
-+    if (tfs_memfs_path_p(path)) return tebako_fs_stat(path, st);
++    if (tfs_memfs_path_p(path)) {
++        int rc = tebako_fs_stat(path, st);
++        if (rc == 0 || errno != ENOENT) return rc;
++    }
 +    return stat(path, st);
 +}
 +
@@ -61,7 +65,10 @@ index 89294ea..9bab75a 100644
 +static int
 +tfs_lstat(const char *path, struct stat *st)
 +{
-+    if (tfs_memfs_path_p(path)) return tebako_fs_stat(path, st);
++    if (tfs_memfs_path_p(path)) {
++        int rc = tebako_fs_stat(path, st);
++        if (rc == 0 || errno != ENOENT) return rc;
++    }
 +    return lstat(path, st);
 +}
 +
@@ -72,7 +79,8 @@ index 89294ea..9bab75a 100644
 +{
 +    if (tfs_memfs_path_p(path)) {
 +        struct stat st;
-+        return tebako_fs_stat(path, &st);
++        int rc = tebako_fs_stat(path, &st);
++        if (rc == 0 || errno != ENOENT) return rc;
 +    }
 +    return access(path, mode);
 +}
@@ -123,7 +131,7 @@ index 89294ea..9bab75a 100644
 +        struct stat stb;
 +        int ret = tebako_fs_stat(path, &stb);
 +        if (ret == 0) tfs_stat_to_stati128(&stb, st);
-+        return ret;
++        if (ret == 0 || errno != ENOENT) return ret;
 +    }
 +    return rb_w32_ustati128(path, st);
 +}
@@ -135,7 +143,7 @@ index 89294ea..9bab75a 100644
 +        struct stat stb;
 +        int ret = tebako_fs_stat(path, &stb);
 +        if (ret == 0) tfs_stat_to_stati128(&stb, st);
-+        return ret;
++        if (ret == 0 || errno != ENOENT) return ret;
 +    }
 +    return rb_w32_ulstati128(path, st);
 +}
@@ -146,7 +154,8 @@ index 89294ea..9bab75a 100644
 +{
 +    if (tfs_memfs_path_p(path)) {
 +        struct stat stb;
-+        return tebako_fs_stat(path, &stb);
++        int ret = tebako_fs_stat(path, &stb);
++        if (ret == 0 || errno != ENOENT) return ret;
 +    }
 +    return rb_w32_uaccess(path, mode);
 +}
@@ -202,7 +211,7 @@ index 89294ea..9bab75a 100644
  /* define system APIs */
  #ifdef _WIN32
  # include "win32/file.h"
-@@ -1304,7 +1464,52 @@ statx(int dirfd, const char *pathname, int flags,
+@@ -1304,7 +1464,55 @@ statx(int dirfd, const char *pathname, int flags,
  }
  #   endif /* __linux__ */
  # endif /* HAVE_STATX */
@@ -238,9 +247,12 @@ index 89294ea..9bab75a 100644
 +    struct stat st;
 +    if ((dirfd == AT_FDCWD || (pathname != NULL && pathname[0] == '/')) &&
 +        tfs_memfs_path_p(pathname)) {
-+        if (tebako_fs_stat(pathname, &st) != 0) return -1;
-+        tfs_stat_to_statx(&st, statxbuf);
-+        return 0;
++        if (tebako_fs_stat(pathname, &st) == 0) {
++            tfs_stat_to_statx(&st, statxbuf);
++            return 0;
++        }
++        if (errno != ENOENT) return -1;
++        /* covered but not held: pass through to the host statx */
 +    }
 +    if (dirfd >= 0 && tebako_fd_is_embedded(dirfd)) {
 +        if (tebako_fs_fstat(dirfd, &st) != 0) return -1;

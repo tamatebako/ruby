@@ -21,32 +21,36 @@ diff --git a/dir.c b/dir.c
 index 96c1a45..283ebc3 100644
 --- a/dir.c
 +++ b/dir.c
-@@ -81,6 +81,148 @@ char *strchr(char*,char);
+@@ -81,6 +81,158 @@ char *strchr(char*,char);
  #define USE_NAME_ON_FS_BY_FNMATCH 2	/* select the matching
                                           * basename by fnmatch */
  
 +/* -- Start of tebako patch -- */
 +#include <tebako/tebako-main.h> /* tebako_mount_point(): the compiled-in fs_mount_point */
 +#include <string.h>               /* strlen/strncmp/memset/memcpy used below */
++#include <errno.h>                /* ENOENT for the host-passthrough fall-through */
 +#include <tebako/fs/c_api.h>     /* modern libtfs C API (tebako_fs_*) */
 +
-+/* Route check: is path inside the memfs mount? (mount-point prefix check vs
-+   the compiled-in fs_mount_point; the memfs is read-only -- writes/cwd go to
-+   the host fs unchanged) */
++/* Route check: does the TFS mount table claim this path? (v2 multi-mount:
++   the driver mounts the env image at the runtime root AND each payload at
++   its declared point, so the v1 mount-point prefix check is replaced by the
++   c_api coverage query. A covered path the mounts do not hold answers
++   ENOENT from the c_api -- jail-gated host passthrough -- and the wrappers
++   below pass it through to the host fs.) */
 +static int
 +tfs_memfs_path_p(const char *path)
 +{
-+    const char *mount = tebako_mount_point();
-+    size_t mount_len;
-+    if (path == NULL || mount == NULL) return 0;
-+    mount_len = strlen(mount);
-+    return strncmp(path, mount, mount_len) == 0;
++    if (path == NULL) return 0;
++    return tebako_path_is_embedded(path);
 +}
 +
 +static int
 +tfs_stat(const char *path, struct stat *st)
 +{
-+    if (tfs_memfs_path_p(path)) return tebako_fs_stat(path, st);
++    if (tfs_memfs_path_p(path)) {
++        int rc = tebako_fs_stat(path, st);
++        if (rc == 0 || errno != ENOENT) return rc;
++    }
 +    return stat(path, st);
 +}
 +
@@ -55,7 +59,10 @@ index 96c1a45..283ebc3 100644
 +static int
 +tfs_lstat(const char *path, struct stat *st)
 +{
-+    if (tfs_memfs_path_p(path)) return tebako_fs_stat(path, st);
++    if (tfs_memfs_path_p(path)) {
++        int rc = tebako_fs_stat(path, st);
++        if (rc == 0 || errno != ENOENT) return rc;
++    }
 +    return lstat(path, st);
 +}
 +
@@ -71,9 +78,12 @@ index 96c1a45..283ebc3 100644
 +tfs_opendir(const char *path)
 +{
 +    tebako_dir_t tdir;
-+    if (!tfs_memfs_path_p(path)) return opendir(path);
-+    tdir = tebako_fs_opendir(path);
-+    return tdir == NULL ? NULL : (DIR *) tdir;
++    if (tfs_memfs_path_p(path)) {
++        tdir = tebako_fs_opendir(path);
++        /* covered but not held (ENOENT): pass through to the host opendir */
++        if (tdir != NULL || errno != ENOENT) return (DIR *) tdir;
++    }
++    return opendir(path);
 +}
 +
 +/* per-thread adaptation buffer: tebako_c_dirent -> struct dirent */

@@ -37,10 +37,6 @@ patches:
     file: openssl_extconf_ruby_export_msys.patch
   - feature: rubygems_openssl_require
     file: rubygems_openssl_require.patch
-  - feature: rubygems_path_support
-    file: rubygems_path_support.patch
-  - feature: rubygems_path_support_msys
-    file: rubygems_path_support_msys.patch
   - feature: thread_pthread_main_stack_musl
     file: thread_pthread_main_stack_musl.patch
   - feature: win32_clock_rename_msys
