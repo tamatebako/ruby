@@ -52,6 +52,8 @@ patches:
     file: io_c_tebako_includes.patch
   - feature: main_c_tebako_main
     file: main_c_tebako_main.patch
+  - feature: process_c_tebako_spawn
+    file: process_c_tebako_spawn.patch
   - feature: mkconfig_memfs_prefix
     file: mkconfig_memfs_prefix.patch
   - feature: mkconfig_memfs_prefix_msys

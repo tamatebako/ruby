@@ -1,0 +1,93 @@
+# process_c_tebako_spawn.patch
+#
+# Target:  process.c (pass2 (all platforms))
+# Source:  v2 design (TODO.testing/08 — exec of memfs-resident binaries)
+#
+# Spawn of a memfs-resident binary: the kernel never sees the memfs, so
+# an exec target HELD by the mounts (tebako_path_is_embedded) is
+# materialized to the host cache (tebako_fs_dlmap2file) and the child
+# re-enters the namespace through the preload shim
+# (DYLD_INSERT_LIBRARIES/LD_PRELOAD) plus the current mounts
+# (TEBAKO_TFS_MOUNTS). Host targets pass through untouched; a covered
+# path the mounts do not hold answers ENOENT and exec fails honestly.
+# The hook is parent-side (before fork), so the materialization work
+# (malloc/extract) never runs in the async-signal-safe child.
+# X-Redesign: v2-spawn
+diff --git a/process.c b/process.c
+index aff3503..93571d4 100644
+--- a/process.c
++++ b/process.c
+@@ -4611,6 +4611,63 @@ rb_execarg_commandline(const struct rb_execarg *eargp, VALUE *prog)
+ }
+ #endif
+ 
++
++/* -- Start of tebako patch -- */
++#include <tebako/fs/c_api.h>     /* modern libtfs C API (tebako_fs_*) */
++#include <stdlib.h>              /* free */
++
++/* Spawn of a memfs-resident binary: materialize the exec target to the
++   host cache and put the preload shim + the current mounts into the
++   child's environment so its own IO resolves through the VFS. */
++static void
++tfs_spawn_prepare(struct rb_execarg *eargp)
++{
++    const char *prog;
++    char *mapped;
++    char *preload;
++    char *mounts;
++
++    if (eargp->use_shell || NIL_P(eargp->invoke.cmd.command_name)) return;
++    prog = RSTRING_PTR(eargp->invoke.cmd.command_name);
++    if (prog == NULL || !tebako_path_is_embedded(prog)) return;
++    mapped = tebako_fs_dlmap2file(prog);
++    if (mapped == NULL) return;  /* covered but not held: a host path — exec answers honestly */
++    eargp->invoke.cmd.command_name = rb_str_new_cstr(mapped);
++    free(mapped);
++
++    /* The preload shim rides the runtime's own image (/lib/tebako/...);
++       its absence only means an older runtime image — the exec proceeds
++       without VFS, answering honestly for paths the host lacks. */
++#if defined(__APPLE__)
++    preload = tebako_fs_dlmap2file("/lib/tebako/libtfs_preload.dylib");
++    if (preload != NULL) {
++        if (NIL_P(eargp->env_modification)) eargp->env_modification = rb_hash_new();
++        rb_hash_aset(eargp->env_modification,
++                     rb_str_new_cstr("DYLD_INSERT_LIBRARIES"),
++                     rb_str_new_cstr(preload));
++        free(preload);
++    }
++#else
++    preload = tebako_fs_dlmap2file("/lib/tebako/libtfs_preload.so");
++    if (preload != NULL) {
++        if (NIL_P(eargp->env_modification)) eargp->env_modification = rb_hash_new();
++        rb_hash_aset(eargp->env_modification,
++                     rb_str_new_cstr("LD_PRELOAD"),
++                     rb_str_new_cstr(preload));
++        free(preload);
++    }
++#endif
++    mounts = tebako_fs_mounts();
++    if (mounts != NULL) {
++        if (NIL_P(eargp->env_modification)) eargp->env_modification = rb_hash_new();
++        rb_hash_aset(eargp->env_modification,
++                     rb_str_new_cstr("TEBAKO_TFS_MOUNTS"),
++                     rb_str_new_cstr(mounts));
++        free(mounts);
++    }
++}
++/* -- End of tebako patch -- */
++
+ static rb_pid_t
+ rb_spawn_process(struct rb_execarg *eargp, char *errmsg, size_t errmsg_buflen)
+ {
+@@ -4624,6 +4681,9 @@ rb_spawn_process(struct rb_execarg *eargp, char *errmsg, size_t errmsg_buflen)
+ #endif
+ 
+ #if defined HAVE_WORKING_FORK && !USE_SPAWNV
++    /* -- Start of tebako patch -- */
++    tfs_spawn_prepare(eargp);
++    /* -- End of tebako patch -- */
+     pid = fork_check_err(eargp->status, rb_exec_atfork, eargp, eargp->redirect_fds, errmsg, errmsg_buflen, eargp);
+ #else
+     prog = eargp->use_shell ? eargp->invoke.sh.shell_script : eargp->invoke.cmd.command_name;
