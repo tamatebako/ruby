@@ -56,6 +56,7 @@ int tebako_fd_is_embedded(int fd);
 int tebako_get_errno(void);
 
 char* tebako_fs_dlmap2file(const char* path);
+char* tebako_fs_mounts(void);
 
 #ifdef __cplusplus
 }
