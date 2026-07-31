@@ -17,7 +17,7 @@ diff --git a/ruby.c b/ruby.c
 index 0d60ece..ce61e2b 100644
 --- a/ruby.c
 +++ b/ruby.c
-@@ -66,6 +66,64 @@
+@@ -66,6 +66,65 @@
  STATIC_ASSERT(Qnil_1bit_from_Qfalse, singlebit_only_p(Qnil^Qfalse));
  STATIC_ASSERT(Qundef_1bit_from_Qnil, singlebit_only_p(Qundef^Qnil));
  
@@ -25,18 +25,19 @@ index 0d60ece..ce61e2b 100644
 +#include <tebako/tebako-main.h> /* tebako_mount_point(): the compiled-in fs_mount_point */
 +#include <tebako/fs/c_api.h>     /* modern libtfs C API (tebako_fs_*) */
 +#include <string.h>               /* strlen/strncmp/memset/memcpy used below */
++#include <errno.h>                /* ENOENT for the host-passthrough fall-through */
 +
-+/* Route check: is path inside the memfs mount? (mount-point prefix check vs
-+   the compiled-in fs_mount_point; the memfs is read-only -- writes/cwd go to
-+   the host fs unchanged) */
++/* Route check: does the TFS mount table claim this path? (v2 multi-mount:
++   the driver mounts the env image at the runtime root AND each payload at
++   its declared point, so the v1 mount-point prefix check is replaced by the
++   c_api coverage query. A covered path the mounts do not hold answers
++   ENOENT from the c_api -- jail-gated host passthrough -- and the wrappers
++   below pass it through to the host fs.) */
 +static int
 +tfs_memfs_path_p(const char *path)
 +{
-+    const char *mount = tebako_mount_point();
-+    size_t mount_len;
-+    if (path == NULL || mount == NULL) return 0;
-+    mount_len = strlen(mount);
-+    return strncmp(path, mount, mount_len) == 0;
++    if (path == NULL) return 0;
++    return tebako_path_is_embedded(path);
 +}
 +
 +/* fcntl on a memfs fd: the memfs is read-only, so the flag state is
@@ -82,7 +83,7 @@ index 0d60ece..ce61e2b 100644
  #ifndef MAXPATHLEN
  # define MAXPATHLEN 1024
  #endif
-@@ -758,7 +812,12 @@ ruby_init_loadpath(void)
+@@ -758,7 +813,12 @@ ruby_init_loadpath(void)
      id_initial_load_path_mark = INITIAL_LOAD_PATH_MARK;
      while (*paths) {
          size_t len = strlen(paths);

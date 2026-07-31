@@ -18,13 +18,14 @@ diff --git a/dir.c b/dir.c
 index 3f73f83..afdf67f 100644
 --- a/dir.c
 +++ b/dir.c
-@@ -126,6 +126,166 @@ char *strchr(char*,char);
+@@ -126,6 +126,174 @@ char *strchr(char*,char);
  
  #define vm_initialized rb_cThread
  
 +/* -- Start of tebako patch -- */
 +#include <tebako/tebako-main.h> /* tebako_mount_point(): the compiled-in fs_mount_point */
 +#include <string.h>               /* strlen/strncmp/memset/memcpy used below */
++#include <errno.h>                /* ENOENT for the host-passthrough fall-through */
 +
 +/* ruby/win32.h maps 'stat' onto stati128; the libtfs C API fills the CRT
 +   struct stat, so keep the plain name visible inside this block */
@@ -32,17 +33,17 @@ index 3f73f83..afdf67f 100644
 +#undef stat
 +#include <tebako/fs/c_api.h>     /* modern libtfs C API (tebako_fs_*) */
 +
-+/* Route check: is path inside the memfs mount? (mount-point prefix check vs
-+   the compiled-in fs_mount_point; the memfs is read-only -- writes/cwd go to
-+   the host fs unchanged) */
++/* Route check: does the TFS mount table claim this path? (v2 multi-mount:
++   the driver mounts the env image at the runtime root AND each payload at
++   its declared point, so the v1 mount-point prefix check is replaced by the
++   c_api coverage query. A covered path the mounts do not hold answers
++   ENOENT from the c_api -- jail-gated host passthrough -- and the wrappers
++   below pass it through to the host fs.) */
 +static int
 +tfs_memfs_path_p(const char *path)
 +{
-+    const char *mount = tebako_mount_point();
-+    size_t mount_len;
-+    if (path == NULL || mount == NULL) return 0;
-+    mount_len = strlen(mount);
-+    return strncmp(path, mount, mount_len) == 0;
++    if (path == NULL) return 0;
++    return tebako_path_is_embedded(path);
 +}
 +
 +/* libtfs c_api extensions (requested): the dir-handle counterparts of the fd
@@ -59,6 +60,9 @@ index 3f73f83..afdf67f 100644
 +    tebako_dir_t tdir;
 +    if (!tfs_memfs_path_p(path)) return rb_w32_uopendir(path);
 +    tdir = tebako_fs_opendir(path);
++    /* covered but not held: a host path — the c_api answered ENOENT and
++       jail-checked it; pass through to the host opendir. */
++    if (tdir == NULL && errno == ENOENT) return rb_w32_uopendir(path);
 +    return tdir == NULL ? NULL : (DIR *) tdir;
 +}
 +
@@ -152,6 +156,9 @@ index 3f73f83..afdf67f 100644
 +        struct stat stb;
 +        int ret = tebako_fs_stat(path, &stb);
 +        if (ret == 0) tfs_stat_to_stati128(&stb, st);
++        /* covered but not held: a host path — pass through (the c_api
++           already jail-checked it). */
++        if (ret != 0 && errno == ENOENT) return rb_w32_ustati128(path, st);
 +        return ret;
 +    }
 +    return rb_w32_ustati128(path, st);
@@ -166,6 +173,7 @@ index 3f73f83..afdf67f 100644
 +        struct stat stb;
 +        int ret = tebako_fs_stat(path, &stb);
 +        if (ret == 0) tfs_stat_to_stati128(&stb, st);
++        if (ret != 0 && errno == ENOENT) return rb_w32_ulstati128(path, st);
 +        return ret;
 +    }
 +    return rb_w32_ulstati128(path, st);
@@ -185,7 +193,7 @@ index 3f73f83..afdf67f 100644
  /* define system APIs */
  #ifdef _WIN32
  # undef chdir
-@@ -556,7 +716,7 @@ dir_initialize(rb_execution_context_t *ec, VALUE dir, VALUE dirname, VALUE enc)
+@@ -556,7 +724,7 @@ dir_initialize(rb_execution_context_t *ec, VALUE dir, VALUE dirname, VALUE enc)
              dp->dir = opendir_without_gvl(path);
          }
  #ifdef HAVE_GETATTRLIST
@@ -194,7 +202,7 @@ index 3f73f83..afdf67f 100644
              u_int32_t attrbuf[1];
              struct attrlist al = {ATTR_BIT_MAP_COUNT, 0};
              if (getattrlist(path, &al, attrbuf, sizeof(attrbuf), FSOPT_NOFOLLOW) == 0) {
-@@ -2413,7 +2573,7 @@ glob_helper(
+@@ -2413,7 +2581,7 @@ glob_helper(
          }
  # endif
  # ifdef HAVE_GETATTRLIST
@@ -203,7 +211,7 @@ index 3f73f83..afdf67f 100644
              flags |= FNM_CASEFOLD;
  # endif
          ruby_glob_entries_t globent;
-@@ -2586,7 +2746,7 @@ glob_helper(
+@@ -2586,7 +2754,7 @@ glob_helper(
                      break;
                  }
  #if USE_NAME_ON_FS == USE_NAME_ON_FS_REAL_BASENAME
@@ -212,7 +220,7 @@ index 3f73f83..afdf67f 100644
                      buf = replace_real_basename(buf, pathlen + (dirsep != 0), enc,
                                                  IF_NORMALIZE_UTF8PATH(1)+0,
                                                  flags, &new_pathtype);
-@@ -3323,6 +3483,8 @@ rb_dir_s_empty_p(VALUE obj, VALUE dirname)
+@@ -3323,6 +3491,8 @@ rb_dir_s_empty_p(VALUE obj, VALUE dirname)
      path = RSTRING_PTR(dirname);
  
  #if defined HAVE_GETATTRLIST && defined ATTR_DIR_ENTRYCOUNT
