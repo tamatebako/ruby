@@ -1,0 +1,83 @@
+# process_c_clock_guard_msys.patch
+#
+# Target:  process.c (pass2 (msys))
+# Source:  v2 design (the msys compile-smoke failure, 3.2/3.3/3.4)
+#
+# ruby 3.2-3.4's clock code declares `clockid_t c` under
+# #ifdef HAVE_CLOCK_GETTIME but uses it under #ifdef CLOCK_* — a guard
+# mismatch: on a mingw whose clock_gettime configure probe fails
+# (ubuntu-latest's mingw-w64), the declaration elides while the usage
+# stays, and process.o fails to compile ('c' undeclared, label
+# 'gettime'/'getres' not defined). Guard the usage with both (upstream
+# fixed the structure in 4.0; 3.1 guards them together already).
+# X-Redesign: v2-msys
+diff --git a/process.c b/process.c
+index 7c9633e..4d71cc7 100644
+--- a/process.c
++++ b/process.c
+@@ -8462,28 +8462,28 @@ rb_clock_gettime(int argc, VALUE *argv, VALUE _)
+ #endif
+ 
+     if (SYMBOL_P(clk_id)) {
+-#ifdef CLOCK_REALTIME
++#if defined(CLOCK_REALTIME) && defined(HAVE_CLOCK_GETTIME)
+         if (clk_id == RUBY_CLOCK_REALTIME) {
+             c = CLOCK_REALTIME;
+             goto gettime;
+         }
+ #endif
+ 
+-#ifdef CLOCK_MONOTONIC
++#if defined(CLOCK_MONOTONIC) && defined(HAVE_CLOCK_GETTIME)
+         if (clk_id == RUBY_CLOCK_MONOTONIC) {
+             c = CLOCK_MONOTONIC;
+             goto gettime;
+         }
+ #endif
+ 
+-#ifdef CLOCK_PROCESS_CPUTIME_ID
++#if defined(CLOCK_PROCESS_CPUTIME_ID) && defined(HAVE_CLOCK_GETTIME)
+         if (clk_id == RUBY_CLOCK_PROCESS_CPUTIME_ID) {
+             c = CLOCK_PROCESS_CPUTIME_ID;
+             goto gettime;
+         }
+ #endif
+ 
+-#ifdef CLOCK_THREAD_CPUTIME_ID
++#if defined(CLOCK_THREAD_CPUTIME_ID) && defined(HAVE_CLOCK_GETTIME)
+         if (clk_id == RUBY_CLOCK_THREAD_CPUTIME_ID) {
+             c = CLOCK_THREAD_CPUTIME_ID;
+             goto gettime;
+@@ -8693,28 +8693,28 @@ rb_clock_getres(int argc, VALUE *argv, VALUE _)
+     VALUE clk_id = argv[0];
+ 
+     if (SYMBOL_P(clk_id)) {
+-#ifdef CLOCK_REALTIME
++#if defined(CLOCK_REALTIME) && defined(HAVE_CLOCK_GETTIME)
+         if (clk_id == RUBY_CLOCK_REALTIME) {
+             c = CLOCK_REALTIME;
+             goto getres;
+         }
+ #endif
+ 
+-#ifdef CLOCK_MONOTONIC
++#if defined(CLOCK_MONOTONIC) && defined(HAVE_CLOCK_GETTIME)
+         if (clk_id == RUBY_CLOCK_MONOTONIC) {
+             c = CLOCK_MONOTONIC;
+             goto getres;
+         }
+ #endif
+ 
+-#ifdef CLOCK_PROCESS_CPUTIME_ID
++#if defined(CLOCK_PROCESS_CPUTIME_ID) && defined(HAVE_CLOCK_GETTIME)
+         if (clk_id == RUBY_CLOCK_PROCESS_CPUTIME_ID) {
+             c = CLOCK_PROCESS_CPUTIME_ID;
+             goto getres;
+         }
+ #endif
+ 
+-#ifdef CLOCK_THREAD_CPUTIME_ID
++#if defined(CLOCK_THREAD_CPUTIME_ID) && defined(HAVE_CLOCK_GETTIME)
+         if (clk_id == RUBY_CLOCK_THREAD_CPUTIME_ID) {
+             c = CLOCK_THREAD_CPUTIME_ID;
+             goto getres;
