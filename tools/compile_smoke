@@ -91,9 +91,9 @@ unless status.success?
 end
 
 failed = objects.reject do |object|
-  _out, _err, status = Open3.capture3("make", object, chdir: src)
-  status.success?
+  out, err, status = Open3.capture3("make", object, chdir: src)
+  status.success? || (failing_output ||= []).push("== make #{object} ==\n#{(out.lines + err.lines).last(30).join}") && false
 end
-abort "tools/compile_smoke: FAIL #{version} (#{platform}): #{failed.join(', ')} did not compile" unless failed.empty?
+abort "tools/compile_smoke: FAIL #{version} (#{platform}): #{failed.join(', ')} did not compile\n#{(failing_output || []).join}" unless failed.empty?
 
 puts "OK #{version} (#{platform}, pass#{options[:pass]}): #{objects.size} patched translation units compile (#{objects.join(', ')})"
