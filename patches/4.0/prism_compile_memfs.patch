@@ -7,17 +7,19 @@
 # tebako_fs_*) when the path is inside the memfs (tfs_string_file_init,
 # composed on the c_api read surface and mirroring the legacy
 # tebako_string_file_init), falling back to pm_read_file otherwise.
-# The file size is read through the wire layout the libtfs c_api
-# writes (mingw _FILE_OFFSET_BITS=64 would otherwise read st_atime
-# for st_size and parse every memfs source as empty). The
-# in-mount check is a mount-point prefix check vs the compiled-in
-# fs_mount_point (tebako_mount_point()).
+# The file size is read through the pinned tebako_stat ABI (the c_api's
+# stat64 layout on windows, platform stat elsewhere): the v1 hand-rolled
+# 32-bit-st_size wire struct read st_size off the stat64 padding and
+# every in-image source parsed as EMPTY (the require returned, nothing
+# was defined -- the 2026-08-01 msys boot-smoke class). The in-mount
+# check is a mount-point prefix check vs the compiled-in fs_mount_point
+# (tebako_mount_point()).
 # X-Redesign: modern-api
 diff --git a/prism_compile.c b/prism_compile.c
 index 4b55775..860dd87 100644
 --- a/prism_compile.c
 +++ b/prism_compile.c
-@@ -1,4 +1,102 @@
+@@ -1,4 +1,80 @@
  #include "prism.h"
 +
 +/* -- Start of tebako patch -- */
@@ -27,7 +29,7 @@ index 4b55775..860dd87 100644
 +#include <fcntl.h>                /* O_RDONLY (not transitive on mingw) */
 +
 +/* ruby/win32.h maps 'stat' onto stati128 on _WIN32; the libtfs C API fills
-+   the CRT struct stat, so keep the plain name visible inside this block */
++   the pinned tebako_stat, so keep the plain name visible inside this block */
 +#pragma push_macro("stat")
 +#undef stat
 +#include <tebako/fs/c_api.h>     /* modern libtfs C API (tebako_fs_*) */
@@ -51,31 +53,9 @@ index 4b55775..860dd87 100644
 +tfs_string_file_init(pm_string_t *string, const char *filepath)
 +{
 +    int fd;
-+#ifdef _WIN32
-+    /* mingw's _FILE_OFFSET_BITS=64 (ruby's AC_SYS_LARGEFILE) widens this
-+       translation unit's struct stat st_size to 64 bits and shifts every
-+       st_*time behind it; the libtfs c_api is compiled without the define
-+       and fills the default ucrt layout (32-bit st_size). Reading
-+       sb.st_size through the widened layout picked up the never-filled
-+       st_atime and every memfs source file parsed as EMPTY -- the require
-+       returned, nothing was defined. Read the fill through the wire
-+       layout libtfs wrote. */
-+    struct tfs_wire_stat {
-+        unsigned int st_dev;
-+        unsigned short st_ino;
-+        unsigned short st_mode;
-+        short st_nlink;
-+        short st_uid;
-+        short st_gid;
-+        unsigned int st_rdev;
-+        long st_size;
-+        long long st_atime;
-+        long long st_mtime;
-+        long long st_ctime;
-+    } sb;
-+#else
-+    struct stat sb;
-+#endif
++    /* The file size comes through the pinned tebako_stat ABI (c_api.h):
++       stat64 on windows, the platform stat elsewhere. */
++    struct tebako_stat sb;
 +    size_t size;
 +    uint8_t *source;
 +    ssize_t bytes_read;
@@ -84,7 +64,7 @@ index 4b55775..860dd87 100644
 +    if (fd == -1) {
 +        return PM_STRING_INIT_ERROR_GENERIC;
 +    }
-+    if (tebako_fs_fstat(fd, (struct stat *) &sb) == -1) {
++    if (tebako_fs_fstat(fd, &sb) == -1) {
 +        tebako_fs_close(fd);
 +        return PM_STRING_INIT_ERROR_GENERIC;
 +    }
@@ -120,7 +100,7 @@ index 4b55775..860dd87 100644
  #include "ruby/version.h"
  
  /**
-@@ -11371,7 +11444,24 @@
+@@ -11371,7 +11422,24 @@
  VALUE
  pm_load_file(pm_parse_result_t *result, VALUE filepath, bool load_error)
  {
