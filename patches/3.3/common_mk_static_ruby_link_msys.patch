@@ -12,7 +12,7 @@ diff --git a/common.mk b/common.mk
 index 70b66b1..15cb461 100644
 --- a/common.mk
 +++ b/common.mk
-@@ -454,7 +454,7 @@ $(LIBRUBY_EXTS):
+@@ -454,7 +454,7 @@
  
  $(STATIC_RUBY)$(EXEEXT): $(MAINOBJ) $(DLDOBJS) $(EXTOBJS) $(LIBRUBY_A)
  	$(Q)$(RM) $@

@@ -94,7 +94,7 @@ index c000b66..8bdb4d1 100644
  /**
   * This compiler defines its own concept of the location of a node. We do this
   * because we want to pair line information with node identifier so that we can
-@@ -11281,7 +11354,24 @@ pm_read_file(pm_string_t *string, const char *filepath)
+@@ -11281,7 +11354,24 @@
  VALUE
  pm_load_file(pm_parse_result_t *result, VALUE filepath, bool load_error)
  {

@@ -12,7 +12,7 @@ diff --git a/template/Makefile.in b/template/Makefile.in
 index 05432cd..5430272 100644
 --- a/template/Makefile.in
 +++ b/template/Makefile.in
-@@ -300,7 +300,7 @@ miniruby$(EXEEXT):
+@@ -300,7 +300,7 @@
  $(PROGRAM):
  		@$(RM) $@
  		$(ECHO) linking $@

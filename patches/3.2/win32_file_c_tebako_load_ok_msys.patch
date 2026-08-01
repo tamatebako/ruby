@@ -13,7 +13,7 @@ diff --git a/win32/file.c b/win32/file.c
 index 31cc1af..c246a00 100644
 --- a/win32/file.c
 +++ b/win32/file.c
-@@ -11,6 +11,41 @@
+@@ -11,6 +11,42 @@
  #include <shlwapi.h>
  #include "win32/file.h"
  
@@ -22,8 +22,9 @@ index 31cc1af..c246a00 100644
 +#include <string.h>               /* strlen/strncmp/memset/memcpy used below */
 +#include <errno.h>                /* ENOENT for the host-passthrough fall-through */
 +
-+/* ruby/win32.h maps 'stat' onto stati128; the libtfs C API fills the CRT
-+   struct stat, so keep the plain name visible inside this block */
++/* ruby/win32.h maps 'stat' onto stati128; the libtfs C API fills the
++   pinned tebako_stat (the c_api ABI), so keep the plain name visible
++   inside this block */
 +#pragma push_macro("stat")
 +#undef stat
 +#include <tebako/fs/c_api.h>     /* modern libtfs C API (tebako_fs_*) */
@@ -46,7 +47,7 @@ index 31cc1af..c246a00 100644
 +static int
 +tfs_file_loadable_p(const char *path)
 +{
-+    struct stat st;
++    struct tebako_stat st;
 +    return tfs_memfs_path_p(path) && tebako_fs_stat(path, &st) == 0 && !S_ISDIR(st.st_mode);
 +}
 +#pragma pop_macro("stat")
@@ -55,7 +56,7 @@ index 31cc1af..c246a00 100644
  #ifndef INVALID_FILE_ATTRIBUTES
  # define INVALID_FILE_ATTRIBUTES ((DWORD)-1)
  #endif
-@@ -600,7 +635,11 @@ rb_file_load_ok(const char *path)
+@@ -600,7 +635,11 @@
      long len;
      wchar_t* wpath;
  

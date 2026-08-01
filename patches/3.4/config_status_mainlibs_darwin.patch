@@ -20,7 +20,7 @@ new mode 100644
 index 2ffe71e..ef90676
 --- a/config.status
 +++ b/config.status
-@@ -641,7 +641,7 @@ S["EXPORT_PREFIX"]=""
+@@ -641,7 +641,7 @@
  S["COMMON_HEADERS"]=""
  S["COMMON_MACROS"]=""
  S["COMMON_LIBS"]=""

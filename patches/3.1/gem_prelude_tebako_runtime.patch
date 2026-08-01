@@ -10,7 +10,7 @@ diff --git a/gem_prelude.rb b/gem_prelude.rb
 index 94ada31..40f76b4 100644
 --- a/gem_prelude.rb
 +++ b/gem_prelude.rb
-@@ -17,3 +17,12 @@ begin
+@@ -17,3 +17,12 @@
  rescue LoadError
    warn "`did_you_mean' was not loaded."
  end if defined?(DidYouMean)

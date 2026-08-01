@@ -9,7 +9,7 @@ diff --git a/common.mk b/common.mk
 index 08fee91..06c7c7b 100644
 --- a/common.mk
 +++ b/common.mk
-@@ -354,7 +354,7 @@ build-ext: $(EXTS_MK)
+@@ -354,7 +354,7 @@
  exts-note: $(EXTS_MK)
  	$(Q)$(MAKE) $(EXTS_NOTE)
  

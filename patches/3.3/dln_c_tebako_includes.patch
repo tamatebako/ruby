@@ -14,7 +14,7 @@ diff --git a/dln.c b/dln.c
 index b4c2fb9..c1aefc5 100644
 --- a/dln.c
 +++ b/dln.c
-@@ -76,7 +76,34 @@ void *xrealloc();
+@@ -76,7 +76,34 @@
  # include <unistd.h>
  #endif
  
@@ -49,7 +49,7 @@ index b4c2fb9..c1aefc5 100644
  static void
  dln_loaderror(const char *format, ...)
  {
-@@ -376,7 +401,29 @@ dln_open(const char *file)
+@@ -376,7 +401,29 @@
  # endif
  
      /* Load file */

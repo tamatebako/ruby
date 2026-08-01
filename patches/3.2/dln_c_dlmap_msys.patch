@@ -14,7 +14,7 @@ diff --git a/dln.c b/dln.c
 index 0edd709..8c17339 100644
 --- a/dln.c
 +++ b/dln.c
-@@ -76,7 +76,34 @@ void *xrealloc();
+@@ -76,7 +76,34 @@
  # include <unistd.h>
  #endif
  
@@ -49,7 +49,7 @@ index 0edd709..8c17339 100644
  static void
  dln_loaderror(const char *format, ...)
  {
-@@ -339,7 +366,29 @@ dln_open(const char *file)
+@@ -339,7 +366,29 @@
      char message[1024];
  
      /* Convert the file path to wide char */

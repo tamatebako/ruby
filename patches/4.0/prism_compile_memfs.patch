@@ -120,7 +120,7 @@ index 4b55775..860dd87 100644
  #include "ruby/version.h"
  
  /**
-@@ -11371,7 +11444,24 @@ pm_read_file(pm_string_t *string, const char *filepath)
+@@ -11371,7 +11444,24 @@
  VALUE
  pm_load_file(pm_parse_result_t *result, VALUE filepath, bool load_error)
  {

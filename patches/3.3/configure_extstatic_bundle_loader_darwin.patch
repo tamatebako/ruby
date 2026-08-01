@@ -13,7 +13,7 @@ diff --git a/configure b/configure
 index 4a57f05..fbc8ac5 100755
 --- a/configure
 +++ b/configure
-@@ -30800,7 +30800,7 @@ then :
+@@ -30800,7 +30800,7 @@
  
                              # Resolve symbols from libruby.dylib in $(LIBS) when --enable-shared
  

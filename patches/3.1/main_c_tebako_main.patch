@@ -25,7 +25,7 @@ index d81cfce..107a288 100644
  {
  #ifdef RUBY_DEBUG_ENV
      ruby_set_debug_option(getenv("RUBY_DEBUG"));
-@@ -41,9 +46,24 @@ main(int argc, char **argv)
+@@ -41,9 +46,24 @@
  #endif
  
      ruby_sysinit(&argc, &argv);

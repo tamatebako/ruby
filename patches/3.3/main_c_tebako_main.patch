@@ -36,7 +36,7 @@ index 97c2858..ce313c7 100644
      return ruby_run_node(ruby_options(argc, argv));
  }
  
-@@ -61,5 +74,12 @@ main(int argc, char **argv)
+@@ -61,5 +74,12 @@
  #endif
  
      ruby_sysinit(&argc, &argv);

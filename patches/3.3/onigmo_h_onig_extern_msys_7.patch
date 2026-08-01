@@ -10,7 +10,7 @@ diff --git a/include/ruby/onigmo.h b/include/ruby/onigmo.h
 index db290cd..bc68841 100644
 --- a/include/ruby/onigmo.h
 +++ b/include/ruby/onigmo.h
-@@ -43,7 +43,7 @@ extern "C" {
+@@ -43,7 +43,7 @@
  
  #ifndef ONIG_EXTERN
  # ifdef RUBY_EXTERN

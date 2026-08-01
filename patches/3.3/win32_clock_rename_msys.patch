@@ -14,7 +14,7 @@ diff --git a/win32/win32.c b/win32/win32.c
 index c51d535..9f554e9 100644
 --- a/win32/win32.c
 +++ b/win32/win32.c
-@@ -4891,7 +4891,7 @@ gettimeofday(struct timeval *tv, struct timezone *tz)
+@@ -4891,7 +4891,7 @@
  
  /* License: Ruby's */
  int
@@ -23,7 +23,7 @@ index c51d535..9f554e9 100644
  {
      switch (clock_id) {
        case CLOCK_REALTIME:
-@@ -4931,7 +4931,7 @@ clock_gettime(clockid_t clock_id, struct timespec *sp)
+@@ -4931,7 +4931,7 @@
  
  /* License: Ruby's */
  int

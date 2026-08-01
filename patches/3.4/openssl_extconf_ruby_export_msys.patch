@@ -9,7 +9,7 @@ diff --git a/ext/openssl/extconf.rb b/ext/openssl/extconf.rb
 index adca064..5599b7b 100644
 --- a/ext/openssl/extconf.rb
 +++ b/ext/openssl/extconf.rb
-@@ -208,8 +208,13 @@ have_func("EVP_MD_CTX_get_pkey_ctx(NULL)", evp_h)
+@@ -208,8 +208,13 @@
  have_func("EVP_PKEY_eq(NULL, NULL)", evp_h)
  have_func("EVP_PKEY_dup(NULL)", evp_h)
  

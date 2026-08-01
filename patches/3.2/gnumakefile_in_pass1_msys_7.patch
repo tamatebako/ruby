@@ -11,7 +11,7 @@ diff --git a/cygwin/GNUmakefile.in b/cygwin/GNUmakefile.in
 index f342d2f..d47736f 100644
 --- a/cygwin/GNUmakefile.in
 +++ b/cygwin/GNUmakefile.in
-@@ -45,6 +45,12 @@ override EXTOBJS += $(if $(filter-out $(RUBYW_INSTALL_NAME),$(@:$(EXEEXT)=)),$(R
+@@ -45,6 +45,12 @@
  RCFILES = $(RUBY_INSTALL_NAME).rc $(RUBYW_INSTALL_NAME).rc $(DLL_BASE_NAME).rc
  RUBYDEF = $(DLL_BASE_NAME).def
  
@@ -24,7 +24,7 @@ index f342d2f..d47736f 100644
  ruby: $(PROGRAM)
  rubyw: $(WPROGRAM)
  
-@@ -63,20 +69,21 @@ $(RUBY_EXP) $(LIBRUBY_SO): $(DLL_BASE_NAME).res.$(OBJEXT)
+@@ -63,20 +69,21 @@
  	  . $(icondirs) $(srcdir)/win32
  
  $(PROGRAM): $(RUBY_INSTALL_NAME).res.$(OBJEXT)

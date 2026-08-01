@@ -22,7 +22,7 @@ diff --git a/process.c b/process.c
 index aff3503..aff3ba4 100644
 --- a/process.c
 +++ b/process.c
-@@ -2746,6 +2746,81 @@ rb_execarg_get(VALUE execarg_obj)
+@@ -2746,6 +2746,81 @@
      return eargp;
  }
  
@@ -104,7 +104,7 @@ index aff3503..aff3ba4 100644
  static VALUE
  rb_execarg_init(int argc, const VALUE *orig_argv, int accept_shell, VALUE execarg_obj)
  {
-@@ -2758,6 +2833,9 @@ rb_execarg_init(int argc, const VALUE *orig_argv, int accept_shell, VALUE execar
+@@ -2758,6 +2833,9 @@
      prog = rb_exec_getargs(&argc, &argv, accept_shell, &env, &opthash);
      rb_exec_fillarg(prog, argc, argv, env, opthash, execarg_obj);
      ALLOCV_END(argv_buf);

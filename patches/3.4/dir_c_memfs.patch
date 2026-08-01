@@ -21,7 +21,7 @@ diff --git a/dir.c b/dir.c
 index b0ff322..0b21b82 100644
 --- a/dir.c
 +++ b/dir.c
-@@ -81,6 +81,158 @@ char *strchr(char*,char);
+@@ -81,6 +81,158 @@
  #define USE_NAME_ON_FS_BY_FNMATCH 2	/* select the matching
                                           * basename by fnmatch */
  
@@ -180,7 +180,7 @@ index b0ff322..0b21b82 100644
  #ifdef HAVE_GETATTRLIST
  # define USE_NAME_ON_FS USE_NAME_ON_FS_REAL_BASENAME
  # define RUP32(size) ((size)+3/4)
-@@ -615,7 +757,7 @@ dir_initialize(rb_execution_context_t *ec, VALUE dir, VALUE dirname, VALUE enc)
+@@ -615,7 +757,7 @@
              dp->dir = opendir_without_gvl(path);
          }
  #ifdef HAVE_GETATTRLIST
@@ -189,7 +189,7 @@ index b0ff322..0b21b82 100644
              u_int32_t attrbuf[1];
              struct attrlist al = {ATTR_BIT_MAP_COUNT, 0};
              struct getattrlist_args args = GETATTRLIST_ARGS(&al, attrbuf, FSOPT_NOFOLLOW);
-@@ -2849,7 +2991,7 @@ glob_helper(
+@@ -2849,7 +2991,7 @@
          }
  # endif
  # ifdef HAVE_GETATTRLIST
@@ -198,7 +198,7 @@ index b0ff322..0b21b82 100644
              flags |= FNM_CASEFOLD;
  # endif
          ruby_glob_entries_t globent;
-@@ -3022,7 +3164,7 @@ glob_helper(
+@@ -3022,7 +3164,7 @@
                      break;
                  }
  #if USE_NAME_ON_FS == USE_NAME_ON_FS_REAL_BASENAME
@@ -207,7 +207,7 @@ index b0ff322..0b21b82 100644
                      buf = replace_real_basename(buf, pathlen + (dirsep != 0), enc,
                                                  IF_NORMALIZE_UTF8PATH(1)+0,
                                                  flags, &new_pathtype);
-@@ -3775,6 +3917,8 @@ rb_dir_s_empty_p(VALUE obj, VALUE dirname)
+@@ -3775,6 +3917,8 @@
      path = RSTRING_PTR(dirname);
  
  #if defined HAVE_GETATTRLIST && defined ATTR_DIR_ENTRYCOUNT

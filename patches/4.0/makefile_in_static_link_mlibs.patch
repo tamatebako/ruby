@@ -12,7 +12,7 @@ diff --git a/template/Makefile.in b/template/Makefile.in
 index 443c394..57b0d7a 100644
 --- a/template/Makefile.in
 +++ b/template/Makefile.in
-@@ -132,7 +132,10 @@ XDLDFLAGS = @DLDFLAGS@
+@@ -132,7 +132,10 @@
  DLDFLAGS = @LIBRUBY_DLDFLAGS@ $(XLDFLAGS) $(ARCH_FLAG)
  SOLIBS = @SOLIBS@
  ENABLE_DEBUG_ENV = @ENABLE_DEBUG_ENV@
@@ -24,7 +24,7 @@ index 443c394..57b0d7a 100644
  ARCHMINIOBJS = @MINIOBJS@
  DLNOBJ = @DLNOBJ@
  ENCOBJS = @ENCOBJS@
-@@ -313,7 +316,9 @@ miniruby$(EXEEXT):
+@@ -313,7 +316,9 @@
  $(PROGRAM):
  		@$(RM) $@
  		$(ECHO) linking $@

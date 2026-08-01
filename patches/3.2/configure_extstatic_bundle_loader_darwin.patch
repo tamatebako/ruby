@@ -13,7 +13,7 @@ diff --git a/configure b/configure
 index 31913d7..985c91a 100755
 --- a/configure
 +++ b/configure
-@@ -30548,7 +30548,7 @@ then :
+@@ -30548,7 +30548,7 @@
                              # Resolve symbols from libruby.dylib when --enable-shared
                              EXTDLDFLAGS='$(LIBRUBYARG_SHARED)'
  

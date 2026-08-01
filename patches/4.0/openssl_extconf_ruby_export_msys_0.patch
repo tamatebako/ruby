@@ -9,7 +9,7 @@ diff --git a/ext/openssl/extconf.rb b/ext/openssl/extconf.rb
 index a897c86..a8b1a6a 100644
 --- a/ext/openssl/extconf.rb
 +++ b/ext/openssl/extconf.rb
-@@ -169,8 +169,13 @@ have_func("TS_VERIFY_CTX_set0_certs(NULL, NULL)", ts_h)
+@@ -169,8 +169,13 @@
  # added in 3.5.0
  have_func("SSL_get0_peer_signature_name(NULL, NULL)", ssl_h)
  

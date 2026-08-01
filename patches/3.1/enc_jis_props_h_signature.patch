@@ -9,7 +9,7 @@ diff --git a/enc/jis/props.h b/enc/jis/props.h
 index 54aa94f..fed4695 100644
 --- a/enc/jis/props.h
 +++ b/enc/jis/props.h
-@@ -69,7 +69,7 @@ struct enc_property {
+@@ -69,7 +69,7 @@
      unsigned char ctype;
  };
  

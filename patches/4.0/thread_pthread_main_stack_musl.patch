@@ -11,7 +11,7 @@ diff --git a/thread_pthread.c b/thread_pthread.c
 index d599abc..f7fa384 100644
 --- a/thread_pthread.c
 +++ b/thread_pthread.c
-@@ -1922,7 +1922,50 @@ size_t pthread_get_stacksize_np(pthread_t);
+@@ -1922,7 +1922,50 @@
  #   define MAINSTACKADDR_AVAILABLE 0
  # endif
  #endif

@@ -19,7 +19,7 @@ diff --git a/io.c b/io.c
 index 3d2e340..f6ee8e6 100644
 --- a/io.c
 +++ b/io.c
-@@ -175,6 +175,182 @@ off_t __syscall(quad_t number, ...);
+@@ -175,6 +175,193 @@
  
  #define IO_MAX_BUFFER_GROWTH 8 * 1024 * 1024 // 8MB
  
@@ -112,7 +112,18 @@ index 3d2e340..f6ee8e6 100644
 +tfs_fstat(int fd, struct stat *st)
 +{
 +    if (tebako_fd_is_embedded(fd)) {
-+        return tebako_fs_fstat(fd, st);
++        /* the boundary buffer is the HOST type; convert the pinned
++           tebako_stat the c_api fills into it (SSOT: c_api.h) */
++        struct tebako_stat stb;
++        int rc = tebako_fs_fstat(fd, &stb);
++        if (rc == 0) {
++            memset(st, 0, sizeof(*st));
++            st->st_mode = stb.st_mode;
++            st->st_size = stb.st_size;
++            st->st_mtime = stb.st_mtime;
++            st->st_nlink = stb.st_nlink;
++        }
++        return rc;
 +    }
 +    return fstat(fd, st);
 +}

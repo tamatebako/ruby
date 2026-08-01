@@ -83,7 +83,7 @@ index 920a249..5cde680 100644
  #ifndef MAXPATHLEN
  # define MAXPATHLEN 1024
  #endif
-@@ -738,7 +793,12 @@ ruby_init_loadpath(void)
+@@ -738,7 +793,12 @@
      id_initial_load_path_mark = INITIAL_LOAD_PATH_MARK;
      while (*paths) {
          size_t len = strlen(paths);

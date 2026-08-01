@@ -16,7 +16,7 @@ diff --git a/io.c b/io.c
 index 3a704fa..4764405 100644
 --- a/io.c
 +++ b/io.c
-@@ -169,10 +169,158 @@ off_t __syscall(quad_t number, ...);
+@@ -169,10 +169,159 @@
  
  #define IO_MAX_BUFFER_GROWTH 8 * 1024 * 1024 // 8MB
  
@@ -25,8 +25,9 @@ index 3a704fa..4764405 100644
 +#include <string.h>               /* strlen/strncmp/memset/memcpy used below */
 +#include <errno.h>                /* ENOENT for the host-passthrough fall-through */
 +
-+/* ruby/win32.h maps 'stat' onto stati128; the libtfs C API fills the CRT
-+   struct stat, so keep the plain name visible inside this block */
++/* ruby/win32.h maps 'stat' onto stati128; the libtfs C API fills the
++   pinned tebako_stat (the c_api ABI), so keep the plain name visible
++   inside this block */
 +#pragma push_macro("stat")
 +#undef stat
 +#include <tebako/fs/c_api.h>     /* modern libtfs C API (tebako_fs_*) */
@@ -89,9 +90,9 @@ index 3a704fa..4764405 100644
 +    return rb_w32_close(fd);
 +}
 +
-+/* tebako_fs_fstat fills a CRT struct stat; convert to ruby's stati128 */
++/* tebako_fs_fstat fills the pinned tebako_stat (the c_api ABI); convert to ruby's stati128 */
 +static void
-+tfs_stat_to_stati128(const struct stat *i, struct stati128 *o)
++tfs_stat_to_stati128(const struct tebako_stat *i, struct stati128 *o)
 +{
 +    o->st_dev = i->st_dev;
 +    o->st_ino = i->st_ino;
@@ -114,7 +115,7 @@ index 3a704fa..4764405 100644
 +tfs_fstati128(int fd, struct stati128 *st)
 +{
 +    if (tebako_fd_is_embedded(fd)) {
-+        struct stat stb;
++        struct tebako_stat stb;
 +        int ret = tebako_fs_fstat(fd, &stb);
 +        if (ret == 0) tfs_stat_to_stati128(&stb, st);
 +        return ret;
@@ -176,7 +177,7 @@ index 3a704fa..4764405 100644
  #undef rename
  #define rename(f, t)	rb_w32_urename((f), (t))
  #endif
-@@ -496,7 +640,8 @@ rb_cloexec_fcntl_dupfd(int fd, int minfd)
+@@ -496,7 +640,8 @@
  
  #if defined(_WIN32)
  #define WAIT_FD_IN_WIN32(fptr) \

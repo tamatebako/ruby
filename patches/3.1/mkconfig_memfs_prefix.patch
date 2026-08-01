@@ -10,7 +10,7 @@ diff --git a/tool/mkconfig.rb b/tool/mkconfig.rb
 index 41bee02..43397d1 100755
 --- a/tool/mkconfig.rb
 +++ b/tool/mkconfig.rb
-@@ -128,7 +128,20 @@ File.foreach "config.status" do |line|
+@@ -128,7 +128,20 @@
        val = '"$(SDKROOT)"'+val if /darwin/ =~ arch
      end
      v = "  CONFIG[\"#{name}\"] #{eq} #{val}\n"

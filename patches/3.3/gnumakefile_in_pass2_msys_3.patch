@@ -10,7 +10,7 @@ diff --git a/cygwin/GNUmakefile.in b/cygwin/GNUmakefile.in
 index 192a8cc..09cd99c 100644
 --- a/cygwin/GNUmakefile.in
 +++ b/cygwin/GNUmakefile.in
-@@ -46,6 +46,12 @@ SOLIBS := $(DLL_BASE_NAME).res.$(OBJEXT) $(SOLIBS)
+@@ -46,6 +46,12 @@
  override EXTOBJS += $(if $(filter-out $(RUBYW_INSTALL_NAME),$(@:$(EXEEXT)=)),$(RUBY_INSTALL_NAME),$(@:$(EXEEXT)=)).res.$(OBJEXT)
  RCFILES = $(RUBY_INSTALL_NAME).rc $(RUBYW_INSTALL_NAME).rc $(DLL_BASE_NAME).rc
  RUBYDEF = $(DLL_BASE_NAME).def
@@ -23,7 +23,7 @@ index 192a8cc..09cd99c 100644
  override LIBRUBY_FOR_LEAKED_GLOBALS := # DLL shows symbols from import library
  
  ruby: $(PROGRAM)
-@@ -65,21 +71,24 @@ $(RUBY_EXP) $(LIBRUBY_SO): $(DLL_BASE_NAME).res.$(OBJEXT)
+@@ -65,21 +71,24 @@
  	  -so_name=$(DLL_BASE_NAME) -output=$(*F) \
  	  . $(icondirs) $(srcdir)/win32
  
