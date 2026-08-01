@@ -28,8 +28,9 @@ extern "C" {
 #define TEBAKO_FD_MAX 0x0FFFFFFF
 
 /* The stat ABI, mirroring the authority (libtfs include/tebako/fs/c_api.h)
- * exactly: the pinned __stat64 layout on Windows, the platform struct
- * stat elsewhere. Keep the layout asserts identical — a drift between
+ * exactly: the pinned __stat64 layout on Windows (64-bit st_size, 56
+ * bytes with natural 8-byte alignment of the i64 fields), the platform
+ * struct stat elsewhere. Keep the layout asserts identical — a drift between
  * this stub and the authority is a compile error here, never a silent
  * ABI fork. */
 #if defined(_WIN32)
@@ -41,14 +42,15 @@ struct tebako_stat {
     int16_t  st_uid;    /* offset 10 */
     int16_t  st_gid;    /* offset 12 */
     uint32_t st_rdev;   /* offset 14 */
-    int64_t  st_size;   /* offset 16 */
-    int64_t  st_atime;  /* offset 24 */
-    int64_t  st_mtime;  /* offset 32 */
-    int64_t  st_ctime;  /* offset 40 */
-};                      /* sizeof 48 */
-_Static_assert(sizeof(struct tebako_stat) == 48, "tebako_stat ABI drift");
-_Static_assert(offsetof(struct tebako_stat, st_size) == 16, "tebako_stat ABI drift");
-_Static_assert(offsetof(struct tebako_stat, st_mtime) == 32, "tebako_stat ABI drift");
+    /* 2 bytes padding to the 8-aligned i64 */
+    int64_t  st_size;   /* offset 24 */
+    int64_t  st_atime;  /* offset 32 */
+    int64_t  st_mtime;  /* offset 40 */
+    int64_t  st_ctime;  /* offset 48 */
+};                      /* sizeof 56 */
+_Static_assert(sizeof(struct tebako_stat) == 56, "tebako_stat ABI drift");
+_Static_assert(offsetof(struct tebako_stat, st_size) == 24, "tebako_stat ABI drift");
+_Static_assert(offsetof(struct tebako_stat, st_mtime) == 40, "tebako_stat ABI drift");
 #else
 #define tebako_stat stat
 #endif
