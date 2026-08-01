@@ -1,0 +1,10 @@
+# ruby 3.3.12 patch manifest (canonical tfs-ruby layout).
+# Entries apply in listed order. Schema: schema/patches.schema.yml.
+version: "3.3.12"
+patches:
+  # rubyw.exe needs wWinMain (LPWSTR) against the modern mingw CRT.
+  # upstream win32/winmain.c gained wmain only at 3.3.7, so the patch
+  # lives in the .7+ overlays, never the line base: 3.3.3-3.3.6 ship the
+  # old main()-based file (and link fine unpatched).
+  - feature: winmain_c_wwinmain_msys
+    file: ../3.2/winmain_c_wwinmain_msys_7.patch

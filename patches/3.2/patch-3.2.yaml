@@ -107,7 +107,3 @@ patches:
     file: ruby_c_memfs_path_msys.patch
   - feature: win32_file_c_tebako_load_ok_msys
     file: win32_file_c_tebako_load_ok_msys.patch
-  # rubyw.exe needs wWinMain (LPWSTR) against the modern mingw CRT —
-  # line-wide (win32/winmain.c is frozen upstream); proven on 3.2.11
-  - feature: winmain_c_wwinmain_msys
-    file: winmain_c_wwinmain_msys_7.patch
