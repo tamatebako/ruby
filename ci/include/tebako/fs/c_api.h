@@ -27,6 +27,32 @@ extern "C" {
 #define TEBAKO_FD_FLAG 0x40000000
 #define TEBAKO_FD_MAX 0x0FFFFFFF
 
+/* The stat ABI, mirroring the authority (libtfs include/tebako/fs/c_api.h)
+ * exactly: the pinned __stat64 layout on Windows, the platform struct
+ * stat elsewhere. Keep the layout asserts identical — a drift between
+ * this stub and the authority is a compile error here, never a silent
+ * ABI fork. */
+#if defined(_WIN32)
+struct tebako_stat {
+    uint32_t st_dev;    /* offset  0 */
+    uint16_t st_ino;    /* offset  4 */
+    uint16_t st_mode;   /* offset  6 */
+    int16_t  st_nlink;  /* offset  8 */
+    int16_t  st_uid;    /* offset 10 */
+    int16_t  st_gid;    /* offset 12 */
+    uint32_t st_rdev;   /* offset 14 */
+    int64_t  st_size;   /* offset 16 */
+    int64_t  st_atime;  /* offset 24 */
+    int64_t  st_mtime;  /* offset 32 */
+    int64_t  st_ctime;  /* offset 40 */
+};                      /* sizeof 48 */
+_Static_assert(sizeof(struct tebako_stat) == 48, "tebako_stat ABI drift");
+_Static_assert(offsetof(struct tebako_stat, st_size) == 16, "tebako_stat ABI drift");
+_Static_assert(offsetof(struct tebako_stat, st_mtime) == 32, "tebako_stat ABI drift");
+#else
+#define tebako_stat stat
+#endif
+
 int tebako_fs_open(const char* path, int flags);
 ssize_t tebako_fs_read(int fd, void* buf, size_t count);
 ssize_t tebako_fs_pread(int fd, void* buf, size_t nbyte, off_t offset);
@@ -48,8 +74,8 @@ void tebako_fs_rewinddir(tebako_dir_t dir);
 long tebako_fs_telldir(tebako_dir_t dir);
 void tebako_fs_seekdir(tebako_dir_t dir, long pos);
 
-int tebako_fs_stat(const char* path, struct stat* st);
-int tebako_fs_fstat(int fd, struct stat* st);
+int tebako_fs_stat(const char* path, struct tebako_stat* st);
+int tebako_fs_fstat(int fd, struct tebako_stat* st);
 
 int tebako_path_is_embedded(const char* path);
 int tebako_fd_is_embedded(int fd);
