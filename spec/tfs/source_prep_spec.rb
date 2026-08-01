@@ -126,6 +126,63 @@ RSpec.describe Tfs::SourcePrep do
     end
   end
 
+  it "writes the mount-root manifest derived from the applied mkconfig block" do
+    Dir.mktmpdir do |dir|
+      patches = write_single_patch_layout(dir, "mkconfig_memfs_prefix.patch", <<~PATCH)
+        diff --git a/hello.txt b/hello.txt
+        --- a/hello.txt
+        +++ b/hello.txt
+        @@ -1,3 +1,3 @@
+         line one
+        -line two
+        +line two (tebako patched)
+         line three
+        diff --git a/tool/mkconfig.rb b/tool/mkconfig.rb
+        new file mode 100644
+        --- /dev/null
+        +++ b/tool/mkconfig.rb
+        @@ -0,0 +1,3 @@
+        +# -- Start of tebako patch --
+        +v = "  CONFIG[\\"prefix\\"] = '/mnt/tfs'
+        +# -- End of tebako patch --
+      PATCH
+      prep = prep_with(seeded_cache(dir), patches)
+
+      tree = prep.prepare("9.9.9", File.join(dir, "out"), platform: "linux-gnu", pass: 2)
+
+      expect(File.read(File.join(tree, "tebako-mount-root"))).to eq("/mnt/tfs\n")
+    end
+  end
+
+  it "fails loudly when the mkconfig block carries conflicting mount roots" do
+    Dir.mktmpdir do |dir|
+      patches = write_single_patch_layout(dir, "mkconfig_memfs_prefix.patch", <<~PATCH)
+        diff --git a/hello.txt b/hello.txt
+        --- a/hello.txt
+        +++ b/hello.txt
+        @@ -1,3 +1,3 @@
+         line one
+        -line two
+        +line two (tebako patched)
+         line three
+        diff --git a/tool/mkconfig.rb b/tool/mkconfig.rb
+        new file mode 100644
+        --- /dev/null
+        +++ b/tool/mkconfig.rb
+        @@ -0,0 +1,4 @@
+        +# -- Start of tebako patch --
+        +v = "  CONFIG[\\"prefix\\"] = '/mnt/tfs'
+        +w = "  CONFIG[\\"other\\"] = 'Z:/other'
+        +# -- End of tebako patch --
+      PATCH
+      prep = prep_with(seeded_cache(dir), patches)
+
+      expect do
+        prep.prepare("9.9.9", File.join(dir, "out"), platform: "linux-gnu", pass: 2)
+      end.to raise_error(Tfs::SourcePrep::Error, /conflicting mount roots/)
+    end
+  end
+
   it "raises KeyError for a version outside the manifest" do
     Dir.mktmpdir do |dir|
       prep = described_class.new(versions: versions, selection: selection, cache_dir: dir)
