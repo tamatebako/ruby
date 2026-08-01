@@ -67,6 +67,7 @@ module Tfs
       @selection.for(version_name, platform: platform, pass: pass).each do |patch|
         apply(src, patch, version_name, [])
       end
+      write_mount_root_manifest!(src)
       src
     end
 
@@ -119,6 +120,33 @@ module Tfs
     end
 
     private
+
+    # The mount-root manifest (tebako-mount-root, at the tree root): the
+    # runtime factory reads the memfs mount root from here instead of
+    # carrying its own copy. The value is DERIVED from the applied
+    # tool/mkconfig.rb (the patch content is the single owner) — never
+    # re-authored here. A tree without the mark is not a tebako tree:
+    # fail loudly.
+    MOUNT_ROOT_MANIFEST = "tebako-mount-root".freeze
+    PATCH_BLOCK = /-- Start of tebako patch --.*?-- End of tebako patch --/m.freeze
+    MOUNT_ROOT_PATTERN = /'((?:[A-Za-z]:)?\/[^'\n]+)'/.freeze
+
+    def write_mount_root_manifest!(src)
+      mkconfig = File.join(src, "tool", "mkconfig.rb")
+      # A tree without tool/mkconfig.rb is synthetic (spec fixtures) —
+      # every real ruby tree carries it, and a REAL tree whose block is
+      # missing or unreadable fails loudly below.
+      return unless File.exist?(mkconfig)
+
+      block = File.read(mkconfig)[PATCH_BLOCK]
+      raise Error, "no tebako patch block in #{mkconfig} — cannot derive the mount root" if block.nil?
+
+      roots = block.scan(MOUNT_ROOT_PATTERN).flatten.uniq
+      raise Error, "no mount-root literal in the tebako block of #{mkconfig}" if roots.empty?
+      raise Error, "conflicting mount roots in the tebako block of #{mkconfig}: #{roots.join(", ")}" if roots.length > 1
+
+      File.write(File.join(src, MOUNT_ROOT_MANIFEST), "#{roots.first}\n")
+    end
 
     def apply(tree, patch, version_name, extra_args)
       unless File.exist?(File.join(tree, patch.target_file))

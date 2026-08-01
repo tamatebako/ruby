@@ -78,13 +78,13 @@ index aff3503..aff3ba4 100644
 +       image — the exec proceeds without VFS, answering honestly for
 +       paths the host lacks. */
 +#if defined(__APPLE__)
-+    preload = tebako_fs_dlmap2file("/__tebako_memfs__/lib/tebako/libtfs_preload.dylib");
++    preload = tebako_fs_dlmap2file("/__tfs__/lib/tebako/libtfs_preload.dylib");
 +    if (preload != NULL) {
 +        tfs_env_set(eargp, "DYLD_INSERT_LIBRARIES", preload);
 +        free(preload);
 +    }
 +#else
-+    preload = tebako_fs_dlmap2file("/__tebako_memfs__/lib/tebako/libtfs_preload.so");
++    preload = tebako_fs_dlmap2file("/__tfs__/lib/tebako/libtfs_preload.so");
 +    if (preload != NULL) {
 +        tfs_env_set(eargp, "LD_PRELOAD", preload);
 +        free(preload);
