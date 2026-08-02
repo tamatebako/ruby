@@ -13,4 +13,7 @@ module Tfs
   autoload :HttpGet, "tfs/http_get"
   autoload :RubyReleases, "tfs/ruby_releases"
   autoload :Onboarder, "tfs/onboarder"
+  autoload :ReleaseDiff, "tfs/release_diff"
+  autoload :BuildPlan, "tfs/build_plan"
+  autoload :ReleaseCopier, "tfs/release_copier"
 end

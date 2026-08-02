@@ -7,6 +7,10 @@
 # is a patches/<line>/ folder touched between the previous release tag and
 # <release-tag> (or HEAD when the tag does not exist yet, e.g. a manual
 # dispatch ahead of tagging; all lines when there is no previous tag).
+# The diff itself is Tfs::ReleaseDiff — the same previous-tag base the
+# build/copy plan (tools/build_matrix) uses; the smoke gate keys on patch
+# sets only, since shared tooling does not change what a patched .c
+# compiles to.
 #
 # Per-version legs (version x scenario of every changed patch set) would
 # multiply configure runs for no extra signal: a patch is line-wide, so a
@@ -23,36 +27,10 @@
 $LOAD_PATH.unshift(File.expand_path("lib", __dir__))
 require "tfs"
 require "json"
-require "open3"
 
 tag = ARGV[0] or abort "usage: tools/smoke_matrix <release-tag>"
 
-def git(*args)
-  out, err, status = Open3.capture3("git", *args)
-  abort "tools/smoke_matrix: git #{args.join(' ')} failed: #{err.strip}" unless status.success?
-
-  out
-end
-
-tags = git("tag", "--list", "v*", "--sort=-version:refname").lines.map(&:strip).reject(&:empty?)
-range =
-  if tags.include?(tag)
-    older = tags[(tags.index(tag) + 1)..]
-    older.empty? ? nil : "#{older.first}..#{tag}"
-  elsif tags.empty?
-    nil
-  else
-    "#{tags.first}..HEAD"
-  end
-
-lines =
-  if range.nil?
-    nil # no previous tag: smoke every line
-  else
-    git("diff", "--name-only", range).lines.map(&:strip)
-                                       .filter_map { |path| path[%r{\Apatches/(\d+\.\d+)/}, 1] }
-                                       .uniq
-  end
+lines = Tfs::ReleaseDiff.new(tag).patch_lines
 
 versions = Tfs::Versions.new
 legs =
