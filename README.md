@@ -132,7 +132,8 @@ packaging host. Canonical patches carry the literal placeholder
 
 Thin executables over the model classes in `tools/lib/tfs/`
 (`Tfs::Versions`, `Tfs::PatchManifest`, `Tfs::PatchSelection`,
-`Tfs::SchemaLint`, `Tfs::SourcePrep`; namespace parent `tools/lib/tfs.rb`
+`Tfs::SchemaLint`, `Tfs::SourcePrep`, `Tfs::ReleaseDiff`, `Tfs::BuildPlan`,
+`Tfs::ReleaseCopier`; namespace parent `tools/lib/tfs.rb`
 wires children with `autoload`):
 
 - `tools/versions [--scenarios]` — prints versions.yml as a GitHub Actions
@@ -176,6 +177,20 @@ wires children with `autoload`):
   compile-smoke matrix: one leg per (changed patch line × scenario) using
   the newest version of each line whose `patches/<line>/` folder changed
   since the previous release tag (all lines when there is none).
+- `tools/build_matrix <release-tag> [--build|--copies|--previous-tag]` —
+  prints release-src's diff-aware build plan (fault isolation: a per-line
+  patch change re-spends only that line). Over the same `Tfs::ReleaseDiff`
+  previous-tag base the smoke gate uses: **build** legs are the versions of
+  changed patch lines, every version on a shared tooling change (`tools/`,
+  `ci/`, `schema/` or any unattributable path — fail closed), and versions
+  whose versions.yml entry is new or moved; **copies** legs are the
+  remaining versions, carried forward from the previous release.
+- `tools/copy_asset <previous-tag> <asset> <dest-dir>` — the carry-forward
+  half of the plan: downloads one asset from the previous release,
+  sha256-verifies the bytes against that release's published `SHA256SUMS`
+  (`Tfs::ReleaseCopier`), and writes `<asset>.sha256` next to it for the
+  publish job. A failed verification is a named error and deletes the
+  download — a bad copy never ships.
 - `tools/compile_smoke <version> [outdir] [--platform NAME] [--pass 1|2]` —
   the release-src compile gate. Applies the version's patch set for one
   scenario, configures the tree, and compiles every translation unit the
@@ -192,10 +207,15 @@ wires children with `autoload`):
 CI: `.github/workflows/lint-patches.yml` lints every version on a matrix
 generated from versions.yml; `.github/workflows/release-src.yml` (tags
 `v*` + manual dispatch) builds the per-scenario
-`tfs-ruby-<version>-src[-<scenario>].tar.gz` assets on the versions.yml
-scenario matrix (`linux-gnu` stays the unsuffixed back-compat asset; msys
-ships `-msys-pass1`/`-msys-pass2`), verifies each artifact against the
-apply output, and publishes the tarballs plus a `SHA256SUMS` to the
+`tfs-ruby-<version>-src[-<scenario>].tar.gz` assets **diff-aware**
+(`tools/build_matrix`): only versions of changed patch lines compile —
+plus every version on a shared tooling change and versions whose
+versions.yml entry is new or moved — while unchanged versions are carried
+forward from the previous release as sha256-verified copies
+(`tools/copy_asset`), so the release's asset set stays complete
+(`linux-gnu` stays the unsuffixed back-compat asset; msys ships
+`-msys-pass1`/`-msys-pass2`). Built artifacts are verified against the
+apply output, and the tarballs plus a `SHA256SUMS` are published to the
 release. Publish is gated on the compile-smoke matrix (roadmap 17.0; the
 v0.2.8 lesson — a patch release shipped apply-clean but uncompilable and
 broke every linux runtime leg): one representative leg per changed patch
