@@ -12,17 +12,36 @@ on:
 
 jobs:
   versions:
-    name: emit version x scenario matrix
+    name: plan build + copy matrices (diff-aware)
     runs-on: ubuntu-latest
     outputs:
       matrix: ${{ steps.emit.outputs.matrix }}
+      copies: ${{ steps.emit.outputs.copies }}
+      previous_tag: ${{ steps.emit.outputs.previous_tag }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+      - name: fetch tags (previous-release diff base)
+        run: git fetch --tags --force
       - uses: ruby/setup-ruby@95ef2b042f9d7a56d8268cba8559e2842e2ad01b # v1.321.0
         with:
           ruby-version: "3.2"
+      # Fault isolation (tools/build_matrix over Tfs::ReleaseDiff, the same
+      # previous-tag diff base the compile-smoke gate uses): only versions
+      # of CHANGED patch lines compile (plus every version on a shared
+      # tooling change, and versions whose versions.yml entry is new or
+      # moved); every unchanged version is carried forward from the
+      # previous release as a sha256-verified copy (the copy job below).
       - id: emit
-        run: echo "matrix=$(tools/versions --scenarios)" >> "$GITHUB_OUTPUT"
+        env:
+          RELEASE_TAG: ${{ github.event_name == 'push' && github.ref_name || inputs.release_tag }}
+        run: |
+          {
+            echo "matrix=$(tools/build_matrix "$RELEASE_TAG" --build)"
+            echo "copies=$(tools/build_matrix "$RELEASE_TAG" --copies)"
+            echo "previous_tag=$(tools/build_matrix "$RELEASE_TAG" --previous-tag)"
+          } >> "$GITHUB_OUTPUT"
 
   changes:
     name: map changed patch lines to compile-smoke legs
@@ -97,28 +116,58 @@ jobs:
       - name: package
         working-directory: build
         run: |
-          tar -czf "tfs-ruby-${{ matrix.version }}-src${{ matrix.suffix }}.tar.gz" "tfs-ruby-${{ matrix.version }}-src"
-          sha256sum "tfs-ruby-${{ matrix.version }}-src${{ matrix.suffix }}.tar.gz" > "tfs-ruby-${{ matrix.version }}-src${{ matrix.suffix }}.tar.gz.sha256"
+          tar -czf "${{ matrix.asset }}" "${{ matrix.tree }}"
+          sha256sum "${{ matrix.asset }}" > "${{ matrix.asset }}.sha256"
       - name: extract-verify
         working-directory: build
         run: |
           mkdir verify
-          tar -xzf "tfs-ruby-${{ matrix.version }}-src${{ matrix.suffix }}.tar.gz" -C verify
-          diff -qr "tfs-ruby-${{ matrix.version }}-src" "verify/tfs-ruby-${{ matrix.version }}-src"
+          tar -xzf "${{ matrix.asset }}" -C verify
+          diff -qr "${{ matrix.tree }}" "verify/${{ matrix.tree }}"
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: tfs-ruby-${{ matrix.version }}-src${{ matrix.suffix }}
-          path: build/tfs-ruby-${{ matrix.version }}-src${{ matrix.suffix }}.tar.gz*
+          path: build/${{ matrix.asset }}*
+          retention-days: 1
+
+  # Versions whose inputs did not move since the previous release are NOT
+  # rebuilt: the previous release's tarballs are carried forward
+  # sha256-verified against the previous release's published SHA256SUMS
+  # (tools/copy_asset -- a failed verification fails the leg loudly, naming
+  # the asset). The new release's asset set stays complete (changed builds
+  # + verified copies), byte-identical with what the previous release
+  # published. An empty copies matrix is a vacuous pass, like compile-smoke.
+  copy:
+    name: copy tfs-ruby-${{ matrix.version }}-src${{ matrix.suffix }} (verified from ${{ needs.versions.outputs.previous_tag }})
+    needs: versions
+    strategy:
+      fail-fast: false
+      matrix: ${{ fromJSON(needs.versions.outputs.copies) }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: ruby/setup-ruby@95ef2b042f9d7a56d8268cba8559e2842e2ad01b # v1.321.0
+        with:
+          ruby-version: "3.2"
+      - name: download + verify against the previous release's SHA256SUMS
+        run: tools/copy_asset "${{ needs.versions.outputs.previous_tag }}" "${{ matrix.asset }}" "$PWD/dist"
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: tfs-ruby-${{ matrix.version }}-src${{ matrix.suffix }}
+          path: dist/${{ matrix.asset }}*
           retention-days: 1
 
   publish:
     name: publish release
-    needs: [build, compile-smoke, changes]
-    # compile-smoke runs legs only for changed patch lines; with no changed
-    # patch set its matrix is empty (result skipped/success -- vacuous
-    # pass). Publish only when the leg map was computed, every build leg
-    # passed, and no smoke leg failed or was cancelled.
-    if: ${{ always() && needs.build.result == 'success' && needs.changes.result == 'success' && (needs.compile-smoke.result == 'success' || needs.compile-smoke.result == 'skipped') }}
+    needs: [versions, build, copy, compile-smoke, changes]
+    # build, copy and compile-smoke run legs only where the diff-aware plan
+    # says so; an empty matrix (nothing to build / nothing to copy / no
+    # changed patch set) is a vacuous pass (result skipped/success).
+    # Publish only when the plan was computed (versions + changes success),
+    # every needed leg passed, and no leg failed or was cancelled. A
+    # skipped leg behind a FAILED plan job is ruled out by the two strict
+    # success requirements.
+    if: ${{ always() && needs.versions.result == 'success' && needs.changes.result == 'success' && (needs.build.result == 'success' || needs.build.result == 'skipped') && (needs.copy.result == 'success' || needs.copy.result == 'skipped') && (needs.compile-smoke.result == 'success' || needs.compile-smoke.result == 'skipped') }}
     runs-on: ubuntu-latest
     permissions:
       contents: write
