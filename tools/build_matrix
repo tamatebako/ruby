@@ -19,18 +19,21 @@
 #   --previous-tag — the bare tag the copies come from (empty on the first
 #             release).
 #
-# With no flag, prints all three as one JSON document.
+# With no flag, prints all three as one JSON document. `--line X.Y`
+# narrows the build/copy plans to one line's rows (the per-line release
+# workflows each plan their own); `--lines` prints the line list itself.
 
 $LOAD_PATH.unshift(File.expand_path("lib", __dir__))
 require "tfs"
 require "json"
 require "tempfile"
 
-tag = ARGV[0] or abort "usage: tools/build_matrix <release-tag> [--build|--copies|--previous-tag]"
+tag = ARGV[0] or abort "usage: tools/build_matrix <release-tag> [--build|--copies|--previous-tag|--lines] [--line X.Y]"
 mode = ARGV[1] || "--all"
-unless %w[--build --copies --previous-tag --all].include?(mode)
-  abort "tools/build_matrix: unknown mode #{mode.inspect} (want --build, --copies or --previous-tag)"
+unless %w[--build --copies --previous-tag --lines --all].include?(mode)
+  abort "tools/build_matrix: unknown mode #{mode.inspect} (want --build, --copies, --previous-tag or --lines)"
 end
+line = ARGV[2] == "--line" ? ARGV[3] : nil
 
 diff = Tfs::ReleaseDiff.new(tag)
 versions = Tfs::Versions.new
@@ -49,8 +52,8 @@ end
 
 plan = Tfs::BuildPlan.new(versions: versions, diff: diff, previous_versions: previous_versions)
 document = {
-  "build" => { "include" => plan.builds },
-  "copies" => { "include" => plan.copies },
+  "build" => { "include" => plan.builds(line: line) },
+  "copies" => { "include" => plan.copies(line: line) },
   "previous_tag" => diff.previous_tag
 }
 
@@ -58,5 +61,6 @@ case mode
 when "--build" then puts JSON.generate(document["build"])
 when "--copies" then puts JSON.generate(document["copies"])
 when "--previous-tag" then puts diff.previous_tag
+when "--lines" then puts JSON.generate(versions.map(&:line).uniq.sort)
 else puts JSON.generate(document)
 end

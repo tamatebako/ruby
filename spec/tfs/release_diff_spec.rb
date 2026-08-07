@@ -89,6 +89,57 @@ RSpec.describe Tfs::ReleaseDiff do
     end
   end
 
+  describe "scenario attribution (#changed_scenarios)" do
+    def diff_with(paths)
+      described_class.new("v0.2.14", git: fake_git(tags: tags, diffs: { "v0.2.13..v0.2.14" => paths.join("\n") }))
+    end
+
+    it "is nil when there is no previous tag (everything changed)" do
+      expect(described_class.new("v0.2.11", git: fake_git(tags: tags)).changed_scenarios).to be_nil
+    end
+
+    it "attributes an msys patch to the msys scenario only" do
+      diff = diff_with(["patches/4.0/mkconfig_memfs_prefix_msys.patch"])
+      expect(diff.changed_scenarios).to eq("4.0" => [["msys", nil]])
+    end
+
+    it "scopes a pass-marked msys patch to that pass's tarball" do
+      diff = diff_with(["patches/3.3/gnumakefile_in_pass1_msys.patch"])
+      expect(diff.changed_scenarios).to eq("3.3" => [["msys", 1]])
+    end
+
+    it "attributes a numbered msys variant to msys" do
+      diff = diff_with(["patches/4.0/openssl_extconf_ruby_export_msys_6.patch"])
+      expect(diff.changed_scenarios).to eq("4.0" => [["msys", nil]])
+    end
+
+    it "attributes a musl patch to linux-musl only" do
+      diff = diff_with(["patches/4.0/thread_pthread_main_stack_musl.patch"])
+      expect(diff.changed_scenarios).to eq("4.0" => [["linux-musl", nil]])
+    end
+
+    it "attributes a darwin patch to nothing (no shipped scenario selects darwin today)" do
+      diff = diff_with(["patches/4.0/configure_extstatic_bundle_loader_darwin.patch"])
+      expect(diff.changed_scenarios).to eq("4.0" => [])
+    end
+
+    it "attributes a base patch to every scenario" do
+      diff = diff_with(["patches/3.4/prism_compile_memfs.patch"])
+      expect(diff.changed_scenarios["3.4"]).to match_array([["linux-gnu", nil], ["linux-musl", nil], ["msys", nil]])
+    end
+
+    it "attributes a line manifest change to every scenario (fail closed)" do
+      diff = diff_with(["patches/3.1/patch-3.1.yaml", "patches/3.4/patch-3.4.2.yaml"])
+      expect(diff.changed_scenarios["3.1"]).to match_array([["linux-gnu", nil], ["linux-musl", nil], ["msys", nil]])
+      expect(diff.changed_scenarios["3.4"]).to match_array([["linux-gnu", nil], ["linux-musl", nil], ["msys", nil]])
+    end
+
+    it "unions attributions across several changed patches of one line" do
+      diff = diff_with(["patches/3.3/dir_c_memfs_msys.patch", "patches/3.3/io_c_tebako_includes.patch"])
+      expect(diff.changed_scenarios["3.3"]).to match_array([["linux-gnu", nil], ["linux-musl", nil], ["msys", nil]])
+    end
+  end
+
   describe "#previous_file" do
     it "reads a file at the previous release tag" do
       git = fake_git(tags: tags, shows: { "v0.2.13:versions.yml" => "versions: {}\n" })

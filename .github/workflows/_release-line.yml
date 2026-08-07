@@ -1,0 +1,152 @@
+# Per-line release unit (release-src.yml calls one per ruby line): the
+# line tip's compile smoke FIRST, the line's build legs only when the tip
+# is green, the line's carry-forward copies in parallel (they verify
+# against the previous release, never the smoke). One line's failure
+# blocks only that line.
+#
+# All matrices come from the shared tools (tools/build_matrix,
+# tools/smoke_matrix with --line) — this workflow carries no matrix
+# logic of its own.
+name: release-line
+
+on:
+  workflow_call:
+    inputs:
+      line:
+        description: The ruby line this unit releases (3.1 / 3.2 / 3.3 / 3.4 / 4.0)
+        required: true
+        type: string
+      tag:
+        description: The tag being published
+        required: true
+        type: string
+
+jobs:
+  plan:
+    name: plan ${{ inputs.line }}
+    runs-on: ubuntu-latest
+    outputs:
+      smoke: ${{ steps.emit.outputs.smoke }}
+      build: ${{ steps.emit.outputs.build }}
+      copies: ${{ steps.emit.outputs.copies }}
+      previous_tag: ${{ steps.emit.outputs.previous_tag }}
+      smoke_count: ${{ steps.emit.outputs.smoke_count }}
+      build_count: ${{ steps.emit.outputs.build_count }}
+      copies_count: ${{ steps.emit.outputs.copies_count }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+      - name: fetch tags (previous-release diff base)
+        run: git fetch --tags --force
+      - uses: ruby/setup-ruby@95ef2b042f9d7a56d8268cba8559e2842e2ad01b # v1.321.0
+        with:
+          ruby-version: "3.2"
+      - id: emit
+        run: |
+          smoke=$(tools/smoke_matrix "${{ inputs.tag }}" --line "${{ inputs.line }}")
+          build=$(tools/build_matrix "${{ inputs.tag }}" --build --line "${{ inputs.line }}")
+          copies=$(tools/build_matrix "${{ inputs.tag }}" --copies --line "${{ inputs.line }}")
+          {
+            echo "smoke=$smoke"
+            echo "build=$build"
+            echo "copies=$copies"
+            echo "previous_tag=$(tools/build_matrix "${{ inputs.tag }}" --previous-tag)"
+            # Leg counts drive the job-level if: guards (an unguarded
+            # empty matrix materializes no legs and poisons the run
+            # conclusion — the v0.2.15 lesson, release-src.yml history).
+            echo "smoke_count=$(jq '.include | length' <<< "$smoke")"
+            echo "build_count=$(jq '.include | length' <<< "$build")"
+            echo "copies_count=$(jq '.include | length' <<< "$copies")"
+          } >> "$GITHUB_OUTPUT"
+
+  # The line tip FIRST: configure the tree of the line's newest version
+  # per affected scenario and compile each patched translation unit
+  # (objects only — no runtime build, no link, no exts) against the
+  # vendored stub tebako headers in ci/include. Only the scenarios the
+  # changed patches FEED get a leg (tools/smoke_matrix).
+  smoke:
+    name: smoke ${{ inputs.line }} (${{ matrix.version }} / ${{ matrix.platform }})
+    needs: plan
+    if: needs.plan.outputs.smoke_count != '0'
+    strategy:
+      fail-fast: false
+      matrix: ${{ fromJSON(needs.plan.outputs.smoke) }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: ruby/setup-ruby@95ef2b042f9d7a56d8268cba8559e2842e2ad01b # v1.321.0
+        with:
+          ruby-version: "3.2"
+      - name: scenario toolchain
+        run: |
+          sudo apt-get update -qq
+          case "${{ matrix.platform }}" in
+            linux-musl) sudo apt-get install -y -qq musl-tools ;;
+            msys) sudo apt-get install -y -qq gcc-mingw-w64-x86-64 ;;
+          esac
+      - name: configure + compile patched translation units
+        run: tools/compile_smoke "${{ matrix.version }}" "$PWD/build/compile-smoke" --platform "${{ matrix.platform }}"
+
+  # The line's build legs run ONLY when the tip smoke passed (or was
+  # vacuous — nothing about the line's patches changed). A failed smoke
+  # blocks this line's builds and nothing else.
+  build:
+    name: build ${{ inputs.line }} (${{ matrix.version }}${{ matrix.suffix }})
+    needs: [plan, smoke]
+    if: ${{ needs.plan.outputs.build_count != '0' && (needs.smoke.result == 'success' || needs.smoke.result == 'skipped') }}
+    strategy:
+      fail-fast: false
+      matrix: ${{ fromJSON(needs.plan.outputs.build) }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: ruby/setup-ruby@95ef2b042f9d7a56d8268cba8559e2842e2ad01b # v1.321.0
+        with:
+          ruby-version: "3.2"
+          bundler-cache: true
+      - name: validate manifests against schema
+        run: bundle exec tools/validate_manifests
+      - name: apply patches
+        run: tools/apply "${{ matrix.version }}" "$PWD/build" --platform "${{ matrix.platform }}" --pass "${{ matrix.pass }}"
+      - name: package
+        working-directory: build
+        run: |
+          tar -czf "${{ matrix.asset }}" "${{ matrix.tree }}"
+          sha256sum "${{ matrix.asset }}" > "${{ matrix.asset }}.sha256"
+      - name: extract-verify
+        working-directory: build
+        run: |
+          mkdir verify
+          tar -xzf "${{ matrix.asset }}" -C verify
+          diff -qr "${{ matrix.tree }}" "verify/${{ matrix.tree }}"
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: tfs-ruby-${{ matrix.version }}-src${{ matrix.suffix }}
+          path: build/${{ matrix.asset }}*
+          retention-days: 1
+
+  # The line's carry-forward copies: sha256-verified against the previous
+  # release's published SHA256SUMS (tools/copy_asset). Independent of the
+  # smoke — a copied asset is byte-identical with what the previous
+  # release published.
+  copy:
+    name: copy ${{ inputs.line }} (${{ matrix.asset }})
+    needs: plan
+    if: needs.plan.outputs.copies_count != '0'
+    strategy:
+      fail-fast: false
+      matrix: ${{ fromJSON(needs.plan.outputs.copies) }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: ruby/setup-ruby@95ef2b042f9d7a56d8268cba8559e2842e2ad01b # v1.321.0
+        with:
+          ruby-version: "3.2"
+      - name: download + verify against the previous release's SHA256SUMS
+        run: tools/copy_asset "${{ needs.plan.outputs.previous_tag }}" "${{ matrix.asset }}" "$PWD/dist"
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: tfs-ruby-${{ matrix.version }}-src${{ matrix.suffix }}
+          path: dist/${{ matrix.asset }}*
+          retention-days: 1

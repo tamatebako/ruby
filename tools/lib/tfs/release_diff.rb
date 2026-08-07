@@ -91,6 +91,43 @@ module Tfs
       changed_paths.filter_map { |path| path[LINE_PATH, 1] }.uniq
     end
 
+    # The scenario axis of the patch changes: which release scenarios each
+    # changed line's patches actually feed. The attribution follows the
+    # PatchSelection conventions (the single model of what lands where):
+    #
+    # * a terminal `_msys` / `_msys_<n>` patch feeds the msys scenario
+    #   only, and a `_pass1`/`_pass2` marker scopes it to that pass's
+    #   tarball alone;
+    # * a terminal `_musl` patch feeds linux-musl only;
+    # * a terminal `_darwin` patch feeds NO shipped scenario today (no
+    #   darwin scenario exists — the base tarball is the linux-gnu
+    #   selection): it attributes to the empty set, and a darwin-only
+    #   change re-rolls nothing. THAT IS A MODEL FACT, not an oversight:
+    #   if a darwin scenario ever ships, extend SCENARIO_BUILDS and this
+    #   map together;
+    # * a base patch (no platform suffix) feeds every scenario — even
+    #   when an msys/musl sibling shadows it on one target, the base
+    #   patch still lands on the others (fail closed, never narrow a
+    #   base patch by shadowing);
+    # * a line manifest (patch-<line>.yaml / patch-<line>.<patch>.yaml)
+    #   re-scopes any feature in the line: all scenarios, fail closed.
+    #
+    # Returns { line => [[scenario, pass_or_nil], ...] }; nil means
+    # "everything" (no previous tag). A line absent from the map had no
+    # attributable patch change.
+    def changed_scenarios
+      return nil if previous_tag.nil?
+
+      changed_paths.each_with_object({}) do |path, acc|
+        m = path.match(%r{\Apatches/(\d+\.\d+)/(.+)})
+        next unless m
+
+        line, name = m.captures
+        acc[line] ||= []
+        acc[line] |= scenario_attribution(name)
+      end
+    end
+
     # A shared input changed (or there is no previous tag): every line
     # rebuilds. Only patches/<line>/** and versions.yml are attributable
     # inputs; anything else — tools/**, ci/**, schema/**, workflows, a
@@ -125,6 +162,34 @@ module Tfs
 
     def shared_path?(path)
       !(path.match?(LINE_PATH) || path == VERSIONS_MANIFEST)
+    end
+
+    ALL_PASSES = [nil].freeze
+    SCENARIO_SUFFIX = /_(msys|musl|darwin)(?:_\d+)?\.patch\z/
+    PASS_MARKER = /_pass([12])(?:_|\z)/
+
+    # One patch path's [scenario, pass] attribution (the class doc's
+    # rules). `pass` is nil unless a _pass1/_pass2 marker scopes the
+    # patch; the msys-only pass markers never narrow a POSIX scenario.
+    def scenario_attribution(name)
+      if name.end_with?(".yaml")
+        return all_scenarios
+      end
+
+      pass = name[PASS_MARKER, 1]&.to_i
+      case name.match(SCENARIO_SUFFIX)&.[](1)
+      when "msys" then [["msys", pass]]
+      when "musl" then [["linux-musl", nil]]
+      when "darwin" then []
+      else
+        # A base patch: every scenario; a pass marker on a base patch is
+        # a manifest authoring error the lint gate owns — attribute wide.
+        all_scenarios
+      end
+    end
+
+    def all_scenarios
+      Tfs::Versions::SCENARIOS.map { |scenario| [scenario, nil] }
     end
   end
 end

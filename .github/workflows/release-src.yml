@@ -11,197 +11,58 @@ on:
         default: v0.0.0
 
 jobs:
-  versions:
-    name: plan build + copy matrices (diff-aware)
+  plan:
+    name: plan the per-line release units (diff-aware)
     runs-on: ubuntu-latest
     outputs:
-      matrix: ${{ steps.emit.outputs.matrix }}
-      copies: ${{ steps.emit.outputs.copies }}
-      build_count: ${{ steps.emit.outputs.build_count }}
-      copies_count: ${{ steps.emit.outputs.copies_count }}
-      previous_tag: ${{ steps.emit.outputs.previous_tag }}
+      lines: ${{ steps.emit.outputs.lines }}
+      lines_count: ${{ steps.emit.outputs.lines_count }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          fetch-depth: 0
-      - name: fetch tags (previous-release diff base)
-        run: git fetch --tags --force
       - uses: ruby/setup-ruby@95ef2b042f9d7a56d8268cba8559e2842e2ad01b # v1.321.0
         with:
           ruby-version: "3.2"
-      # Fault isolation (tools/build_matrix over Tfs::ReleaseDiff, the same
-      # previous-tag diff base the compile-smoke gate uses): only versions
-      # of CHANGED patch lines compile (plus every version on a shared
-      # tooling change, and versions whose versions.yml entry is new or
-      # moved); every unchanged version is carried forward from the
-      # previous release as a sha256-verified copy (the copy job below).
+      # One release unit per line PRESENT in versions.yml: changed lines
+      # build (their smoke gates their builds), unchanged lines carry
+      # their assets forward as sha256-verified copies. The line's own
+      # unit recomputes its rows from the shared tools (tools/build_matrix
+      # --line / tools/smoke_matrix --line over Tfs::ReleaseDiff's
+      # patch→scenario attribution) — no matrix logic lives in YAML.
       - id: emit
         env:
           RELEASE_TAG: ${{ github.event_name == 'push' && github.ref_name || inputs.release_tag }}
         run: |
-          build=$(tools/build_matrix "$RELEASE_TAG" --build)
-          copies=$(tools/build_matrix "$RELEASE_TAG" --copies)
+          lines=$(tools/build_matrix "$RELEASE_TAG" --lines)
           {
-            echo "matrix=$build"
-            echo "copies=$copies"
-            # Leg counts drive the job-level if: guards on build/copy: an
-            # UNGUARDED empty matrix ({"include":[]}) materializes no legs
-            # and no check run, yet the orchestrator reports the job as
-            # not-success/not-skipped and fails the whole run (the v0.2.15
-            # tag runs 30975733360/30978817396: 165/165 legs green, publish
-            # skipped, run failure, because the copies plan was empty).
-            # Same count-guard pattern as release-monitor.yml's onboard job.
-            echo "build_count=$(jq '.include | length' <<< "$build")"
-            echo "copies_count=$(jq '.include | length' <<< "$copies")"
-            echo "previous_tag=$(tools/build_matrix "$RELEASE_TAG" --previous-tag)"
+            echo "lines=$lines"
+            # The count drives the job-level if: on release (an
+            # unguarded empty matrix poisons the run conclusion).
+            echo "lines_count=$(jq 'length' <<< "$lines")"
           } >> "$GITHUB_OUTPUT"
 
-  changes:
-    name: map changed patch lines to compile-smoke legs
-    runs-on: ubuntu-latest
-    outputs:
-      matrix: ${{ steps.emit.outputs.matrix }}
-      smoke_count: ${{ steps.emit.outputs.smoke_count }}
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          fetch-depth: 0
-      - name: fetch tags (previous-release diff base)
-        run: git fetch --tags --force
-      - uses: ruby/setup-ruby@95ef2b042f9d7a56d8268cba8559e2842e2ad01b # v1.321.0
-        with:
-          ruby-version: "3.2"
-      - id: emit
-        run: |
-          matrix=$(tools/smoke_matrix "${{ github.event_name == 'push' && github.ref_name || inputs.release_tag }}")
-          {
-            echo "matrix=$matrix"
-            # Leg count drives the job-level if: guard on compile-smoke
-            # (why an unguarded empty matrix breaks the run: see the
-            # versions job's emit step).
-            echo "smoke_count=$(jq '.include | length' <<< "$matrix")"
-          } >> "$GITHUB_OUTPUT"
-
-  # Publish gate (roadmap 17.0; the v0.2.8 lesson: a patch release shipped
-  # apply-clean but uncompilable and broke every linux runtime leg). For
-  # every line whose patch set changed in the tag (tools/smoke_matrix diffs
-  # the tag against the previous release tag), configure the tree and
-  # compile each patched translation unit of the line's NEWEST version per
-  # shipped scenario -- a representative per-line leg, not per-version:
-  # patches are line-wide, so per-version legs would multiply configure
-  # runs for no extra signal. The compile is the cheapest that catches a
-  # broken shim: ./configure + make <obj> per patched .c (objects only --
-  # no runtime build, no link, no exts), against the vendored stub tebako
-  # headers in ci/include. msys legs compile at pass 2 (the pass split
-  # selects GNUmakefile variants; no patched .c differs between passes).
-  # With no changed patch set the plan is empty and the gate is vacuous:
-  # the job-level if: below then skips the job CLEANLY (an unguarded empty
-  # matrix would poison the run conclusion -- see the versions job's emit
-  # step), and publish's if: treats that skipped as pass, failure as block.
-  compile-smoke:
-    name: compile-smoke ${{ matrix.version }} (${{ matrix.platform }})
-    needs: changes
-    if: needs.changes.outputs.smoke_count != '0'
+  # The per-line release units: each line's tip smoke runs FIRST and
+  # gates only its own line's builds; copies run independently. A line
+  # that fails blocks the publish (its changed assets must never be
+  # back-filled with stale copies) but never another line's work.
+  release:
+    name: release ${{ matrix.line }}
+    needs: plan
+    if: needs.plan.outputs.lines_count != '0'
     strategy:
       fail-fast: false
-      matrix: ${{ fromJSON(needs.changes.outputs.matrix) }}
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - uses: ruby/setup-ruby@95ef2b042f9d7a56d8268cba8559e2842e2ad01b # v1.321.0
-        with:
-          ruby-version: "3.2"
-      - name: scenario toolchain
-        run: |
-          sudo apt-get update -qq
-          case "${{ matrix.platform }}" in
-            linux-musl) sudo apt-get install -y -qq musl-tools ;;
-            msys) sudo apt-get install -y -qq gcc-mingw-w64-x86-64 ;;
-          esac
-      - name: configure + compile patched translation units
-        run: tools/compile_smoke "${{ matrix.version }}" "$PWD/build/compile-smoke" --platform "${{ matrix.platform }}"
-
-  build:
-    name: tfs-ruby-${{ matrix.version }}-src${{ matrix.suffix }}
-    needs: versions
-    if: needs.versions.outputs.build_count != '0'
-    strategy:
-      fail-fast: false
-      matrix: ${{ fromJSON(needs.versions.outputs.matrix) }}
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - uses: ruby/setup-ruby@95ef2b042f9d7a56d8268cba8559e2842e2ad01b # v1.321.0
-        with:
-          ruby-version: "3.2"
-          bundler-cache: true
-      - name: validate manifests against schema
-        run: bundle exec tools/validate_manifests
-      - name: apply patches
-        run: tools/apply "${{ matrix.version }}" "$PWD/build" --platform "${{ matrix.platform }}" --pass "${{ matrix.pass }}"
-      - name: package
-        working-directory: build
-        run: |
-          tar -czf "${{ matrix.asset }}" "${{ matrix.tree }}"
-          sha256sum "${{ matrix.asset }}" > "${{ matrix.asset }}.sha256"
-      - name: extract-verify
-        working-directory: build
-        run: |
-          mkdir verify
-          tar -xzf "${{ matrix.asset }}" -C verify
-          diff -qr "${{ matrix.tree }}" "verify/${{ matrix.tree }}"
-      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
-        with:
-          name: tfs-ruby-${{ matrix.version }}-src${{ matrix.suffix }}
-          path: build/${{ matrix.asset }}*
-          retention-days: 1
-
-  # Versions whose inputs did not move since the previous release are NOT
-  # rebuilt: the previous release's tarballs are carried forward
-  # sha256-verified against the previous release's published SHA256SUMS
-  # (tools/copy_asset -- a failed verification fails the leg loudly, naming
-  # the asset). The new release's asset set stays complete (changed builds
-  # + verified copies), byte-identical with what the previous release
-  # published. An empty copies plan skips the job via the same count guard
-  # as compile-smoke (a vacuous pass for publish's if:).
-  copy:
-    name: copy tfs-ruby-${{ matrix.version }}-src${{ matrix.suffix }} (verified from ${{ needs.versions.outputs.previous_tag }})
-    needs: versions
-    if: needs.versions.outputs.copies_count != '0'
-    strategy:
-      fail-fast: false
-      matrix: ${{ fromJSON(needs.versions.outputs.copies) }}
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - uses: ruby/setup-ruby@95ef2b042f9d7a56d8268cba8559e2842e2ad01b # v1.321.0
-        with:
-          ruby-version: "3.2"
-      - name: download + verify against the previous release's SHA256SUMS
-        run: tools/copy_asset "${{ needs.versions.outputs.previous_tag }}" "${{ matrix.asset }}" "$PWD/dist"
-      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
-        with:
-          name: tfs-ruby-${{ matrix.version }}-src${{ matrix.suffix }}
-          path: dist/${{ matrix.asset }}*
-          retention-days: 1
+      matrix:
+        line: ${{ fromJSON(needs.plan.outputs.lines) }}
+    uses: ./.github/workflows/_release-line.yml
+    with:
+      line: ${{ matrix.line }}
+      tag: ${{ github.event_name == 'push' && github.ref_name || inputs.release_tag }}
 
   publish:
     name: publish release
-    needs: [versions, build, copy, compile-smoke, changes]
-    # build, copy and compile-smoke run legs only where the diff-aware plan
-    # says so; each carries a job-level if: guard on its leg count, so an
-    # empty plan (nothing to build / nothing to copy / no changed patch
-    # set) skips the job CLEANLY (result skipped) instead of expanding an
-    # empty matrix -- an unguarded empty matrix materializes no legs and no
-    # check run, its needs.<job>.result is neither 'success' nor 'skipped',
-    # and the orchestrator fails the whole run (v0.2.15: runs 30975733360
-    # and 30978817396 had 165/165 legs green yet publish skipped and the
-    # runs concluded failure, because the copies plan was empty). Publish
-    # only when the plan was computed (versions + changes success), every
-    # needed leg passed, and no leg failed or was cancelled. A skipped leg
-    # behind a FAILED plan job is ruled out by the two strict success
-    # requirements.
-    if: ${{ always() && needs.versions.result == 'success' && needs.changes.result == 'success' && (needs.build.result == 'success' || needs.build.result == 'skipped') && (needs.copy.result == 'success' || needs.copy.result == 'skipped') && (needs.compile-smoke.result == 'success' || needs.compile-smoke.result == 'skipped') }}
+    needs: [plan, release]
+    # Every line unit succeeded (or there was nothing to do): a failed
+    # line blocks the publish rather than shipping its stale copies.
+    if: ${{ always() && needs.plan.result == 'success' && (needs.release.result == 'success' || needs.release.result == 'skipped') }}
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -211,12 +72,9 @@ jobs:
       # next publish-gate flake must be self-explaining in the job log.
       - name: needs results (publish gate diagnostic)
         run: |
-          echo "versions.result      = ${{ needs.versions.result }}"
-          echo "changes.result       = ${{ needs.changes.result }}"
-          echo "build.result         = ${{ needs.build.result }}"
-          echo "copy.result          = ${{ needs.copy.result }}"
-          echo "compile-smoke.result = ${{ needs['compile-smoke'].result }}"
-          echo "needs (full)         = ${{ toJSON(needs) }}"
+          echo "plan.result    = ${{ needs.plan.result }}"
+          echo "release.result = ${{ needs.release.result }}"
+          echo "needs (full)   = ${{ toJSON(needs) }}"
       - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
           pattern: tfs-ruby-*-src*

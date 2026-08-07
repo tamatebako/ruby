@@ -15,5 +15,6 @@ module Tfs
   autoload :Onboarder, "tfs/onboarder"
   autoload :ReleaseDiff, "tfs/release_diff"
   autoload :BuildPlan, "tfs/build_plan"
+  autoload :SmokePlan, "tfs/smoke_plan"
   autoload :ReleaseCopier, "tfs/release_copier"
 end
