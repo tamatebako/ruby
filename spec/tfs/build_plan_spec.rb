@@ -113,4 +113,53 @@ RSpec.describe Tfs::BuildPlan do
     expect(plan.builds).to eq([])
     expect(plan.copies.size).to eq(7)
   end
+
+  context "with an msys-only patch change" do
+    let(:plan) do
+      described_class.new(versions: versions, diff: diff_for(["patches/3.3/dir_c_memfs_msys.patch"]), previous_versions: previous)
+    end
+
+    it "re-rolls only the msys tarballs of the line's versions" do
+      expect(plan.builds.map { |row| row[:asset] }).to eq([
+        "tfs-ruby-3.3.7-src-msys-pass1.tar.gz",
+        "tfs-ruby-3.3.7-src-msys-pass2.tar.gz"
+      ])
+    end
+
+    it "carries every POSIX asset forward as a verified copy" do
+      expect(plan.copies.size).to eq(5)
+      expect(plan.copies.map { |row| row[:asset] }).to include("tfs-ruby-3.3.3-src.tar.gz", "tfs-ruby-3.3.7-src.tar.gz", "tfs-ruby-3.3.7-src-linux-musl.tar.gz")
+    end
+  end
+
+  it "scopes a pass-marked msys patch to that pass alone" do
+    plan = described_class.new(versions: versions, diff: diff_for(["patches/3.3/gnumakefile_in_pass1_msys.patch"]), previous_versions: previous)
+    expect(plan.builds.map { |row| row[:asset] }).to eq(["tfs-ruby-3.3.7-src-msys-pass1.tar.gz"])
+    expect(plan.copies.size).to eq(6)
+  end
+
+  it "re-rolls only the musl tarball on a musl patch change" do
+    plan = described_class.new(versions: versions, diff: diff_for(["patches/3.3/thread_pthread_main_stack_musl.patch"]), previous_versions: previous)
+    expect(plan.builds.map { |row| row[:asset] }).to eq(["tfs-ruby-3.3.7-src-linux-musl.tar.gz"])
+    expect(plan.copies.size).to eq(6)
+  end
+
+  it "re-rolls nothing on a darwin-only change (no shipped scenario selects darwin today)" do
+    plan = described_class.new(versions: versions, diff: diff_for(["patches/3.3/configure_extstatic_bundle_loader_darwin.patch"]), previous_versions: previous)
+    expect(plan.builds).to eq([])
+    expect(plan.copies.size).to eq(7)
+  end
+
+  context "with the line filter (the per-line release workflows)" do
+    it "narrows builds to the line's rows" do
+      plan = described_class.new(versions: versions, diff: diff_for([], tags: []))
+      expect(plan.builds(line: "3.3").map { |row| row[:version] }.uniq).to eq(%w[3.3.3 3.3.7])
+      expect(plan.builds(line: "3.3").size).to eq(5)
+    end
+
+    it "narrows copies to the line's rows" do
+      plan = described_class.new(versions: versions, diff: diff_for([]), previous_versions: previous)
+      expect(plan.copies(line: "3.4").map { |row| row[:asset] }).to eq(["tfs-ruby-3.4.1-src.tar.gz"])
+    end
+  end
 end
