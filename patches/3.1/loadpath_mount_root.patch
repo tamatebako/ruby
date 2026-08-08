@@ -1,0 +1,54 @@
+# loadpath_mount_root.patch
+#
+# Target:  ruby.c (the interpreter's initial $LOAD_PATH construction)
+# Source:  tebako v2 — spec 17 §1 (the TEBAKO_MOUNT_ROOT run-time override)
+#
+# Re-root the compiled-in load paths onto the run-time override: when
+# TEBAKO_MOUNT_ROOT is set (the driver mounted the env image there and
+# the image's layout granted mount_root_override), every baked path under
+# the exec prefix is re-rooted onto it; rbconfig follows the same env via
+# the mkconfig_memfs_prefix patch. Unset or empty: byte-identical
+# upstream behavior. The windows (LOAD_RELATIVE) branch is untouched and
+# the helper is guarded out of its compile.
+# (3.1/3.2 anchor: the rb_libruby_selfpath block precedes the function.)
+# X-Redesign: modern-api
+diff --git a/ruby.c b/ruby.c
+index 189f631..c937c59 100644
+--- a/ruby.c
++++ b/ruby.c
+@@ -655,6 +655,26 @@ VALUE ruby_archlibdir_path, ruby_prefix_path;
+ VALUE rb_libruby_selfpath;
+ #endif
+ 
++#if !defined(LOAD_RELATIVE)
++/* -- Start of tebako patch -- */
++/* TEBAKO_MOUNT_ROOT (spec 17 §1): the driver may mount the env image at
++   a run-time override root; rbconfig follows via the mkconfig patch and
++   this re-roots the compiled-in load paths the same way — a baked path
++   under the exec prefix is re-rooted onto the override. Unset or empty:
++   byte-identical upstream behavior. (LOAD_RELATIVE builds take the other
++   branch — the helper stays out of their compile.) */
++static VALUE
++tebako_mount_root_path_new(const char *path, size_t len)
++{
++    const char *root = getenv("TEBAKO_MOUNT_ROOT");
++    size_t plen = strlen(ruby_exec_prefix);
++    if (root && *root && len >= plen && strncmp(path, ruby_exec_prefix, plen) == 0)
++        return rb_str_cat(rb_str_new(root, strlen(root)), path + plen, len - plen);
++    return rb_str_new(path, len);
++}
++/* -- End of tebako patch -- */
++#endif
++
+ void
+ ruby_init_loadpath(void)
+ {
+@@ -738,7 +758,7 @@ ruby_init_loadpath(void)
+ #define RUBY_RELATIVE(path, len) rb_str_buf_cat(BASEPATH(), (path), (len))
+ #else
+     const size_t exec_prefix_len = strlen(ruby_exec_prefix);
+-#define RUBY_RELATIVE(path, len) rubylib_path_new((path), (len))
++#define RUBY_RELATIVE(path, len) tebako_mount_root_path_new((path), (len))
+ #define PREFIX_PATH() RUBY_RELATIVE(ruby_exec_prefix, exec_prefix_len)
+ #endif
+     rb_gc_register_address(&ruby_prefix_path);

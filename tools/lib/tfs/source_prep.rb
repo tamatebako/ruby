@@ -131,6 +131,16 @@ module Tfs
     PATCH_BLOCK = /-- Start of tebako patch --.*?-- End of tebako patch --/m.freeze
     MOUNT_ROOT_PATTERN = /'((?:[A-Za-z]:)?\/[^'\n]+)'/.freeze
 
+    # The override capability manifest (tebako-mount-root-override): the
+    # tree carries the loadpath patch ⇒ the interpreter's compiled-in
+    # load paths follow TEBAKO_MOUNT_ROOT at run time — the fact the
+    # factory turns into the image layout's mount_root_override grant.
+    # An absent patch ⇒ an absent manifest ⇒ the grant stays closed
+    # (the driver's fail-closed direction). The marker is the patch's
+    # own symbol in the applied ruby.c — derived, never re-authored.
+    OVERRIDE_MANIFEST = "tebako-mount-root-override".freeze
+    OVERRIDE_MARKER = "tebako_mount_root_path_new".freeze
+
     def write_mount_root_manifest!(src)
       mkconfig = File.join(src, "tool", "mkconfig.rb")
       # A tree without tool/mkconfig.rb is synthetic (spec fixtures) —
@@ -146,6 +156,11 @@ module Tfs
       raise Error, "conflicting mount roots in the tebako block of #{mkconfig}: #{roots.join(", ")}" if roots.length > 1
 
       File.write(File.join(src, MOUNT_ROOT_MANIFEST), "#{roots.first}\n")
+
+      rubyc = File.join(src, "ruby.c")
+      if File.exist?(rubyc) && File.read(rubyc).include?(OVERRIDE_MARKER)
+        File.write(File.join(src, OVERRIDE_MANIFEST), "true\n")
+      end
     end
 
     def apply(tree, patch, version_name, extra_args)
