@@ -4,8 +4,9 @@
 # Source:  tebako gem lib/tebako/packager/pass2_patch.rb Pass2Patch#tool_mkconfig_rb_patch, patch_literals.rb TOOL_MKCONFIG_RB_SUBST_MSYS
 #
 # msys variant: rewrite CONFIG["prefix"] and CONFIG["RUBY_EXEC_PREFIX"] to
-# the tebako memfs mount point (A:/__tfs__) in the generated
-# rbconfig.rb.
+# the tebako memfs mount point (A:/t — the owner's final short root) in
+# the generated rbconfig.rb, run-time overridable via
+# ENV["TEBAKO_MOUNT_ROOT"] (spec 17 §1).
 # X-Redesign: modern-api
 diff --git a/tool/mkconfig.rb b/tool/mkconfig.rb
 index e6d61c5..3ed357d 100755
@@ -18,12 +19,12 @@ index e6d61c5..3ed357d 100755
 +# -- Start of tebako patch --
 +    v_head_comp = "  CONFIG[\"prefix\"] #{eq} "
 +    if v_head_comp == v[0...(v_head_comp.length)]
-+      v = "#{v[0...(v_head_comp.length)]}CONFIG[\"RUBY_EXEC_PREFIX\"] = 'A:/__tfs__'
++      v = "#{v[0...(v_head_comp.length)]}CONFIG[\"RUBY_EXEC_PREFIX\"] = ENV[\"TEBAKO_MOUNT_ROOT\"] || 'A:/t'
 +"
 +    end
 +    v_head_comp = "  CONFIG[\"RUBY_EXEC_PREFIX\"] #{eq} "
 +    if v_head_comp == v[0...(v_head_comp.length)]
-+      v = "#{v[0...(v_head_comp.length)]}'A:/__tfs__'
++      v = "#{v[0...(v_head_comp.length)]}ENV[\"TEBAKO_MOUNT_ROOT\"] || 'A:/t'
 +"
 +    end
 +# -- End of tebako patch --
