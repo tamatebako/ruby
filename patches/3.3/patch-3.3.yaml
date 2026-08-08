@@ -124,5 +124,7 @@ patches:
     file: ruby_c_fcntl_shim.patch
   - feature: ruby_c_memfs_path_msys
     file: ruby_c_memfs_path_msys.patch
+  - feature: loadpath_mount_root
+    file: loadpath_mount_root.patch
   - feature: win32_file_c_tebako_load_ok_msys
     file: win32_file_c_tebako_load_ok_msys.patch
