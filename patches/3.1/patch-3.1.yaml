@@ -49,6 +49,8 @@ patches:
     file: dln_c_dlmap_msys.patch
   - feature: dln_c_tebako_includes
     file: dln_c_tebako_includes.patch
+  - feature: dln_c_loader_interpose
+    file: dln_c_loader_interpose.patch
   - feature: file_c_tebako_includes
     file: file_c_tebako_includes.patch
   - feature: gem_prelude_tebako_runtime

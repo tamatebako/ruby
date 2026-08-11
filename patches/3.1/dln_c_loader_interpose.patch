@@ -1,0 +1,159 @@
+# dln_c_loader_interpose.patch
+#
+# Target:  dln.c (pass2 (linux gnu/musl))
+# Source:  v2 design (docs/spec/22 -- runtime-native interposition, class L)
+#
+# Interpose the process's loader on ELF: the runtime binary's own
+# dlopen/dlerror definitions preempt process-wide (the interpreter, its
+# C extensions, and any library they pull), so EVERY native-library load
+# in the process -- the interpreter's dln_load, ffi, fiddle, and C
+# extensions self-loading -- routes a VFS-resident path through the
+# libtfs materialization (tebako_fs_dlmap2file: the library plus its
+# Mach-O/ELF dependency closure to the exec cache) and loads the real
+# file. Host paths pass through untouched; a covered path the mounts do
+# not hold answers ENOENT and the raw call serves it from the host (the
+# dln_load precedent). A materialization failure is a named error -- the
+# library, the mount, the verdict -- delivered through the dlerror
+# channel, never a silent host fallback. dlsym is not interposed: the
+# wrapper returns real handles, so dlsym needs no routing (a main-binary
+# dlsym cannot resolve its own original on musl -- no dlvsym). Inert on
+# macOS (dyld applies __interpose tuples only from dylibs, never from
+# the main executable: the macOS interposition is the driver's
+# self-insertion at boot) and on windows (its own dln path).
+# X-Redesign: v2-loader-interpose
+diff --git a/dln.c b/dln.c
+index 44e8c06..7c641f3 100644
+--- a/dln.c
++++ b/dln.c
+@@ -100,6 +100,131 @@ dln_loaderror(const char *format, ...)
+ # define USE_DLN_DLOPEN
+ #endif
+ 
++#if defined(USE_DLN_DLOPEN) && !defined(__APPLE__)
++/* -- Start of tebako patch (dln_c_loader_interpose) -- */
++/* Loader interposition (spec 22, class L, ELF): the runtime binary's
++   own dlopen/dlerror definitions preempt process-wide (the interpreter,
++   its C extensions, and any library they pull), so EVERY native-library
++   load in the process -- the interpreter's dln_load, ffi, fiddle, and C
++   extensions self-loading -- routes a VFS-resident path through the
++   libtfs materialization (tebako_fs_dlmap2file: the library plus its
++   dependency closure to the exec cache) and loads the real file. Host
++   paths pass through untouched; a covered path the mounts do not hold
++   answers ENOENT and the raw call serves it from the host (the dln_load
++   precedent). A materialization failure is a named error -- the library,
++   the mount, the verdict -- delivered through the dlerror channel, never
++   a silent host fallback. dlsym is not interposed: the wrapper returns
++   real handles, so dlsym needs no routing (and a main-binary dlsym
++   cannot resolve its own original on musl -- no dlvsym).
++   macOS is excluded: dyld applies __interpose tuples only from dylibs,
++   never from the main executable, so the macOS interposition is the
++   driver's self-insertion at boot (crates/tebako-driver), not this TU. */
++
++#include <dlfcn.h>
++#include <stdio.h>
++#include <stdlib.h>
++#include <string.h>
++#include <errno.h>
++#include <tebako/fs/c_api.h>     /* modern libtfs C API (tebako_fs_*) */
++
++/* libtfs c_api extension (requested): tebako_fs_mount_of -- the mount
++   point of the longest-prefix mount covering a path (NULL + ENOENT when
++   uncovered); declared here so this translation unit stays C99-clean
++   meanwhile */
++char *tebako_fs_mount_of(const char *path);
++
++typedef void *(*tfs_dlopen_fn)(const char *, int);
++typedef char *(*tfs_dlerror_fn)(void);
++
++static __thread char tfs_dl_verdict[1024];
++static __thread int tfs_dl_verdict_pending;
++
++/* The materialization verdict becomes the dlerror() answer of the
++   failed call, so ffi/fiddle/dln raise carrying this exact line. (The
++   driver's macOS interpose dylib keeps the same verdict wording -- the
++   two shells differ in plumbing, not in the contract.) */
++static void
++tfs_dl_remember(const char *path, int err)
++{
++    char *mount = tebako_fs_mount_of(path);
++    snprintf(tfs_dl_verdict, sizeof(tfs_dl_verdict),
++             "tebako: cannot materialize VFS-resident library '%s' (mount '%s'): %s",
++             path, mount != NULL ? mount : "(unknown)", strerror(err));
++    free(mount);
++    tfs_dl_verdict_pending = 1;
++}
++
++static void *
++tfs_dlopen_route(const char *path, int mode, tfs_dlopen_fn real_dlopen)
++{
++    void *handle;
++    char *mapped;
++    int err;
++
++    tfs_dl_verdict_pending = 0;
++    if (!tebako_path_is_embedded(path)) {
++        return real_dlopen(path, mode);
++    }
++    mapped = tebako_fs_dlmap2file(path);
++    if (mapped != NULL) {
++        handle = real_dlopen(mapped, mode);
++        free(mapped);
++        return handle;
++    }
++    err = errno;
++    if (err == ENOENT) {
++        /* covered but not held: a host path the mount happens to
++           cover -- the raw call serves it from the host */
++        return real_dlopen(path, mode);
++    }
++    tfs_dl_remember(path, err);
++    errno = err;  /* the failed call's own errno, for direct errno readers */
++    return NULL;
++}
++
++static char *
++tfs_dlerror_route(tfs_dlerror_fn real_dlerror)
++{
++    if (tfs_dl_verdict_pending) {
++        tfs_dl_verdict_pending = 0;
++        return tfs_dl_verdict;
++    }
++    return real_dlerror();
++}
++
++/* The originals resolve through dlsym(RTLD_NEXT) -- the next object
++   after the main binary in the global scope; dlsym itself is never
++   defined here, so the lookup is not interposed. */
++static tfs_dlopen_fn
++tfs_real_dlopen(void)
++{
++    static tfs_dlopen_fn real_fn;
++    if (real_fn == NULL) real_fn = (tfs_dlopen_fn)dlsym(RTLD_NEXT, "dlopen");
++    return real_fn;
++}
++
++static tfs_dlerror_fn
++tfs_real_dlerror(void)
++{
++    static tfs_dlerror_fn real_fn;
++    if (real_fn == NULL) real_fn = (tfs_dlerror_fn)dlsym(RTLD_NEXT, "dlerror");
++    return real_fn;
++}
++
++void *
++dlopen(const char *path, int mode)
++{
++    return tfs_dlopen_route(path, mode, tfs_real_dlopen());
++}
++
++char *
++dlerror(void)
++{
++    return tfs_dlerror_route(tfs_real_dlerror());
++}
++/* -- End of tebako patch -- */
++#endif
++
+ #if defined(__hp9000s300) || ((defined(__NetBSD__) || defined(__FreeBSD__) || defined(__OpenBSD__)) && !defined(__ELF__)) || defined(NeXT) || defined(MACOSX_DYLD)
+ # define EXTERNAL_PREFIX "_"
+ #else

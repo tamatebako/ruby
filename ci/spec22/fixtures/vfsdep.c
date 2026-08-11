@@ -1,0 +1,9 @@
+/* vfsdep.c — leaf dependency of libvfsprobe: exists so the spec-22 probe
+ * exercises the Mach-O/ELF dependency-closure walk of tebako_fs_dlmap2file
+ * (libvfsprobe links this library; the closure walk must extract BOTH next
+ * to each other in the exec cache for the real dlopen to resolve it). */
+int
+vfsdep_value(void)
+{
+    return 41;
+}
