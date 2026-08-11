@@ -70,8 +70,12 @@ spec22 (…)` line otherwise. Everything transient is under
 rebuild from scratch, or delete a single artifact to rebuild just that
 stage (the link unit is reused across runs by design).
 
-Platform notes: macOS uses the `__DATA,__interpose` section in the runtime
-binary; ELF (linux-gnu/musl) uses the main binary's own `dlopen`/`dlerror`
-definitions, which preempt process-wide (verify on ELF with
+Platform notes: on macOS dyld honors `__DATA,__interpose` tuples only
+from dylib images (never from the main executable — verified
+empirically), so the macOS interposition is the DRIVER's self-insertion
+at boot (crates/tebako-driver's embedded interpose dylib +
+`DYLD_INSERT_LIBRARIES` + a once-only re-exec); ELF (linux-gnu/musl)
+uses the main binary's own `dlopen`/`dlerror` definitions from this
+patch, which preempt process-wide (verify on ELF with
 `nm -D <runtime-exe> | grep ' T dlopen'`). The probe is POSIX-only;
 windows is out of phase-1 scope.
