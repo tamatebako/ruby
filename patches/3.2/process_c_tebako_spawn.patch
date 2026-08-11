@@ -5,7 +5,7 @@
 #
 # Spawn of a memfs-resident binary: the kernel never sees the memfs, so
 # an exec target HELD by the mounts (tebako_path_is_embedded) is
-# materialized to the host cache (tebako_fs_dlmap2file) and the exec
+# materialized to the host cache (tebako_fs_exec_materialize — home-layout mounts whole-tree) and the exec
 # pair (command_name, command_abspath — the child execve()s
 # command_abspath) is pointed at the host copy. The child re-enters the
 # namespace through the preload shim (DYLD_INSERT_LIBRARIES/LD_PRELOAD)
@@ -67,7 +67,7 @@ index aff3503..aff3ba4 100644
 +    if (eargp->use_shell || !RB_TYPE_P(eargp->invoke.cmd.command_name, T_STRING)) return;
 +    prog = RSTRING_PTR(eargp->invoke.cmd.command_name);
 +    if (prog == NULL || !tebako_path_is_embedded(prog)) return;
-+    mapped = tebako_fs_dlmap2file(prog);
++    mapped = tebako_fs_exec_materialize(prog);
 +    if (mapped == NULL) return;  /* covered but not held: a host path — exec answers honestly */
 +    eargp->invoke.cmd.command_name = rb_str_new_cstr(mapped);
 +    eargp->invoke.cmd.command_abspath = rb_str_new_cstr(mapped);
