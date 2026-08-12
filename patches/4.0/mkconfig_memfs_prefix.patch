@@ -6,16 +6,29 @@
 # Rewrite CONFIG["prefix"] and CONFIG["RUBY_EXEC_PREFIX"] to the tebako
 # memfs mount point (/__tfs__) in the generated rbconfig.rb, run-time
 # overridable via ENV["TEBAKO_MOUNT_ROOT"] (spec 17 §1).
+#
+# Also embed MAINLIBS literally into LIBRUBYARG_STATIC. mkmf probe
+# Makefiles define LIBRUBYARG_STATIC but not $(MAINLIBS), so a static
+# libruby-static.a that carries unresolved tebako_fs_* symbols (from
+# dir_c_memfs, dln_c_loader_interpose, process_c_tebako_spawn) would
+# fail to link. Folding MAINLIBS in at rbconfig-generation time keeps
+# every probe link self-contained.
 # X-Redesign: modern-api
 diff --git a/tool/mkconfig.rb b/tool/mkconfig.rb
-index db74115..c5710d9 100755
+index 41bee02..43397d1 100755
 --- a/tool/mkconfig.rb
 +++ b/tool/mkconfig.rb
-@@ -135,7 +135,20 @@
+@@ -135,8 +135,27 @@
        val = '"$(SDKROOT)"'+val if /darwin/ =~ arch
      end
      v = "  CONFIG[\"#{name}\"] #{eq} #{val}\n"
 +# -- Start of tebako patch --
++    # mkmf probe Makefiles reference LIBRUBYARG_STATIC but never define
++    # $(MAINLIBS). Fold the closure in so probes link the same libraries
++    # as the ruby program itself.
++    if name == "LIBRUBYARG_STATIC" && vars["MAINLIBS"]
++      v = v.gsub(/\$\(MAINLIBS\)|\$\{MAINLIBS\}/) { vars["MAINLIBS"] }
++    end
 +    v_head_comp = "  CONFIG[\"prefix\"] #{eq} "
 +    if v_head_comp == v[0...(v_head_comp.length)]
 +        v = "#{v[0...(v_head_comp.length)]}ENV[\"TEBAKO_MOUNT_ROOT\"] || '/__tfs__'
@@ -28,7 +41,9 @@ index db74115..c5710d9 100755
 +    end
 +# -- End of tebako patch --
      if fast[name]
+ 
 +
        v_fast << v
      else
        v_others << v
+

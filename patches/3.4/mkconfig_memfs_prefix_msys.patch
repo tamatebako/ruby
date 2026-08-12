@@ -12,11 +12,17 @@ diff --git a/tool/mkconfig.rb b/tool/mkconfig.rb
 index a83a356..96c4d2f 100755
 --- a/tool/mkconfig.rb
 +++ b/tool/mkconfig.rb
-@@ -137,7 +137,20 @@
+@@ -137,8 +137,27 @@
        val = '"$(SDKROOT)"'+val if /darwin/ =~ arch
      end
      v = "  CONFIG[\"#{name}\"] #{eq} #{val}\n"
 +# -- Start of tebako patch --
++    # mkmf probe Makefiles reference LIBRUBYARG_STATIC but never define
++    # $(MAINLIBS). Fold the closure in so probes link the same libraries
++    # as the ruby program itself.
++    if name == "LIBRUBYARG_STATIC" && vars["MAINLIBS"]
++      v = v.gsub(/\$\(MAINLIBS\)|\$\{MAINLIBS\}/) { vars["MAINLIBS"] }
++    end
 +    v_head_comp = "  CONFIG[\"prefix\"] #{eq} "
 +    if v_head_comp == v[0...(v_head_comp.length)]
 +      v = "#{v[0...(v_head_comp.length)]}CONFIG[\"RUBY_EXEC_PREFIX\"] = ENV[\"TEBAKO_MOUNT_ROOT\"] || 'A:/t'
