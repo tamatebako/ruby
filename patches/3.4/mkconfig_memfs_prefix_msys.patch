@@ -1,18 +1,17 @@
 # mkconfig_memfs_prefix_msys.patch
 #
 # Target:  tool/mkconfig.rb (pass2 (msys))
-# Source:  tebako gem lib/tebako/packager/pass2_patch.rb Pass2Patch#tool_mkconfig_rb_patch, patch_literals.rb TOOL_MKCONFIG_RB_SUBST_MSYS
 #
 # msys variant: rewrite CONFIG["prefix"] and CONFIG["RUBY_EXEC_PREFIX"] to
-# the tebako memfs mount point (A:/t — the owner's final short root) in
-# the generated rbconfig.rb, run-time overridable via
-# ENV["TEBAKO_MOUNT_ROOT"] (spec 17 §1).
+# the tebako memfs mount point (A:/t) in the generated rbconfig.rb,
+# run-time overridable via ENV["TEBAKO_MOUNT_ROOT"] (spec 17).
+#
+# Also embed MAINLIBS literally into LIBRUBYARG_STATIC (see the
+# non-msys patch for the rationale).
 # X-Redesign: modern-api
-diff --git a/tool/mkconfig.rb b/tool/mkconfig.rb
-index a83a356..96c4d2f 100755
 --- a/tool/mkconfig.rb
 +++ b/tool/mkconfig.rb
-@@ -137,8 +137,27 @@
+@@ -137,6 +137,24 @@
        val = '"$(SDKROOT)"'+val if /darwin/ =~ arch
      end
      v = "  CONFIG[\"#{name}\"] #{eq} #{val}\n"
@@ -35,7 +34,5 @@ index a83a356..96c4d2f 100755
 +    end
 +# -- End of tebako patch --
      if fast[name]
-+
        v_fast << v
      else
-       v_others << v
