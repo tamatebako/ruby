@@ -8,10 +8,13 @@
 # materialized to the host cache (tebako_fs_exec_materialize — home-layout mounts whole-tree) and the exec
 # pair (command_name, command_abspath — the child execve()s
 # command_abspath) is pointed at the host copy. The child re-enters the
-# namespace through the preload shim (DYLD_INSERT_LIBRARIES/LD_PRELOAD)
-# plus the current mounts (TEBAKO_TFS_MOUNTS), injected via
-# env_modification in ruby's internal representation (hidden array of
-# hidden [key, val] pairs — a hash here crashes parent_start1).
+# namespace through the preload shim (DYLD_INSERT_LIBRARIES/LD_PRELOAD
+# at the in-VFS path read from TEBAKO_PRELOAD_SHIM — the driver's flow
+# of the env image's layout grant, with a literal fallback for images
+# predating the grant) plus the current mounts (TEBAKO_TFS_MOUNTS),
+# injected via env_modification in ruby's internal representation
+# (hidden array of hidden [key, val] pairs — a hash here crashes
+# parent_start1).
 # Host targets pass through untouched; a covered path the mounts do not
 # hold answers ENOENT and exec fails honestly. Shell-form spawns and
 # bare command names (PATH search) do not resolve through the VFS.
@@ -22,7 +25,7 @@ diff --git a/process.c b/process.c
 index aff3503..aff3ba4 100644
 --- a/process.c
 +++ b/process.c
-@@ -2746,6 +2746,81 @@
+@@ -2746,6 +2746,87 @@
      return eargp;
  }
  
@@ -60,6 +63,7 @@ index aff3503..aff3ba4 100644
 +tfs_spawn_prepare(struct rb_execarg *eargp)
 +{
 +    const char *prog;
++    const char *shim;
 +    char *mapped;
 +    char *preload;
 +    char *mounts;
@@ -73,18 +77,23 @@ index aff3503..aff3ba4 100644
 +    eargp->invoke.cmd.command_abspath = rb_str_new_cstr(mapped);
 +    free(mapped);
 +
-+    /* The preload shim rides the runtime's own env image (/lib/tebako/...
-+       under the memfs root); its absence only means an older runtime
-+       image — the exec proceeds without VFS, answering honestly for
-+       paths the host lacks. */
++    /* The shim's in-VFS path flows from the env image's layout grant
++       (TEBAKO_PRELOAD_SHIM, exported by the driver — the SSOT); the
++       literal is the transition fallback for an image predating the
++       grant. Its absence only means an older runtime image — the exec
++       proceeds without VFS, answering honestly for paths the host
++       lacks. */
++    shim = getenv("TEBAKO_PRELOAD_SHIM");
 +#if defined(__APPLE__)
-+    preload = tebako_fs_dlmap2file("/__tfs__/lib/tebako/libtfs_preload.dylib");
++    if (shim == NULL || *shim == '\0') shim = "/__tfs__/lib/tebako/libtfs_preload.dylib";
++    preload = tebako_fs_dlmap2file(shim);
 +    if (preload != NULL) {
 +        tfs_env_set(eargp, "DYLD_INSERT_LIBRARIES", preload);
 +        free(preload);
 +    }
 +#else
-+    preload = tebako_fs_dlmap2file("/__tfs__/lib/tebako/libtfs_preload.so");
++    if (shim == NULL || *shim == '\0') shim = "/__tfs__/lib/tebako/libtfs_preload.so";
++    preload = tebako_fs_dlmap2file(shim);
 +    if (preload != NULL) {
 +        tfs_env_set(eargp, "LD_PRELOAD", preload);
 +        free(preload);
@@ -104,7 +113,7 @@ index aff3503..aff3ba4 100644
  static VALUE
  rb_execarg_init(int argc, const VALUE *orig_argv, int accept_shell, VALUE execarg_obj)
  {
-@@ -2758,6 +2833,9 @@
+@@ -2758,6 +2839,9 @@
      prog = rb_exec_getargs(&argc, &argv, accept_shell, &env, &opthash);
      rb_exec_fillarg(prog, argc, argv, env, opthash, execarg_obj);
      ALLOCV_END(argv_buf);
