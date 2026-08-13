@@ -20,12 +20,23 @@
 # bare command names (PATH search) do not resolve through the VFS.
 # The hook is parent-side (before fork), so the materialization work
 # (malloc/extract) never runs in the async-signal-safe child.
+# darwin24 (macos arm64, factory run 31699651270): dyld TERMINATES an
+# Apple-restricted binary at exec when the inherited
+# DYLD_INSERT_LIBRARIES names a foreign dylib — darwin23 stripped the
+# variable instead. Under the driver's process-wide export that killed
+# /bin/sh and /usr/bin/cc for every system()/backtick of a packaged
+# interpreter. The hook drops the inherited variable per spawn whose
+# target is restricted (any shell form; anything resolving into Apple's
+# system binary dirs) — a restricted target can never honor the
+# insertion on any host, so the scrub loses nothing. Non-restricted
+# host targets (a third-party JRE) keep the driver's delivery — spec 22
+# §3.1's array form.
 # X-Redesign: v2-spawn
 diff --git a/process.c b/process.c
 index aff3503..aff3ba4 100644
 --- a/process.c
 +++ b/process.c
-@@ -2746,6 +2746,87 @@
+@@ -2746,6 +2746,174 @@
      return eargp;
  }
  
@@ -52,6 +63,84 @@ index aff3503..aff3ba4 100644
 +                                           EXPORT_STR(rb_str_new_cstr(val)))));
 +}
 +
++#if defined(__APPLE__)
++/* dyld TERMINATES an Apple-restricted binary at exec when
++   DYLD_INSERT_LIBRARIES names a foreign dylib (factory run 31699651270,
++   macos arm64 darwin24: /bin/sh and /usr/bin/cc died under the armed
++   env; darwin23 stripped the variable instead — spec 22 §3.1). Drop the
++   inherited variable per spawn whose target is restricted; the nil pair
++   DELETES the inherited entry (rb_execarg_parent_start1's NIL_P branch,
++   st_delete). */
++static void
++tfs_env_unset(struct rb_execarg *eargp, const char *key)
++{
++    VALUE env = eargp->env_modification;
++    if (!RB_TYPE_P(env, T_ARRAY)) {
++        env = hide_obj(rb_ary_new());
++        eargp->env_modification = env;
++    }
++    rb_ary_push(env, hide_obj(rb_assoc_new(EXPORT_STR(rb_str_new_cstr(key)),
++                                           Qnil)));
++}
++
++/* execvp's PATH search mirrored parent-side (empty elements mean "."):
++   the first executable candidate wins; no hit returns prog unchanged —
++   the child's own search then fails the same way. */
++static const char *
++tfs_resolve_in_path(const char *prog, char *buf, size_t buflen)
++{
++    const char *path = getenv("PATH");
++    const char *p, *e;
++    size_t len;
++
++    if (path == NULL) return prog;
++    for (p = path;; p = e + 1) {
++        e = strchr(p, ':');
++        len = e != NULL ? (size_t)(e - p) : strlen(p);
++        if (len == 0) {
++            if (access(prog, X_OK) == 0) return prog;
++        }
++        else if (len + strlen(prog) + 2 <= buflen) {
++            memcpy(buf, p, len);
++            buf[len] = '/';
++            strcpy(buf + len + 1, prog);
++            if (access(buf, X_OK) == 0) return buf;
++        }
++        if (e == NULL) break;
++    }
++    return prog;
++}
++
++/* The spawn target dyld would kill under the armed env: any shell form
++   (the shell is always a platform binary) and anything resolving into
++   Apple's system binary dirs. A bare name resolves through the PATH
++   mirror above — /usr/bin/cc is restricted even when named "cc". */
++static int
++tfs_spawn_target_restricted(struct rb_execarg *eargp)
++{
++    static const char *const restricted_dirs[] = {
++        "/bin/", "/sbin/", "/usr/bin/", "/usr/sbin/", "/usr/libexec/", "/System/"
++    };
++    char resolved[MAXPATHLEN];
++    const char *prog;
++    size_t i;
++
++    if (eargp->use_shell) return 1;
++    prog = RB_TYPE_P(eargp->invoke.cmd.command_abspath, T_STRING)
++         ? RSTRING_PTR(eargp->invoke.cmd.command_abspath) : NULL;
++    if (prog == NULL && RB_TYPE_P(eargp->invoke.cmd.command_name, T_STRING))
++        prog = RSTRING_PTR(eargp->invoke.cmd.command_name);
++    if (prog == NULL) return 0;
++    if (strchr(prog, '/') == NULL)
++        prog = tfs_resolve_in_path(prog, resolved, sizeof(resolved));
++    for (i = 0; i < sizeof(restricted_dirs) / sizeof(restricted_dirs[0]); i++) {
++        if (strncmp(prog, restricted_dirs[i], strlen(restricted_dirs[i])) == 0)
++            return 1;
++    }
++    return 0;
++}
++#endif
++
 +/* Spawn of a memfs-resident binary: materialize the exec target to the
 +   host cache, point command_abspath at it (the child execve()s
 +   command_abspath; command_name follows for error reporting), and put
@@ -67,6 +156,15 @@ index aff3503..aff3ba4 100644
 +    char *mapped;
 +    char *preload;
 +    char *mounts;
++
++#if defined(__APPLE__)
++    /* The scrub first: a restricted target dies under the inherited
++       variable at exec, before the VFS flow below could matter. */
++    if (tfs_spawn_target_restricted(eargp)) {
++        tfs_env_unset(eargp, "DYLD_INSERT_LIBRARIES");
++        return;
++    }
++#endif
 +
 +    if (eargp->use_shell || !RB_TYPE_P(eargp->invoke.cmd.command_name, T_STRING)) return;
 +    prog = RSTRING_PTR(eargp->invoke.cmd.command_name);
@@ -113,7 +211,7 @@ index aff3503..aff3ba4 100644
  static VALUE
  rb_execarg_init(int argc, const VALUE *orig_argv, int accept_shell, VALUE execarg_obj)
  {
-@@ -2758,6 +2839,9 @@
+@@ -2758,6 +2926,9 @@
      prog = rb_exec_getargs(&argc, &argv, accept_shell, &env, &opthash);
      rb_exec_fillarg(prog, argc, argv, env, opthash, execarg_obj);
      ALLOCV_END(argv_buf);
