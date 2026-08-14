@@ -16,6 +16,10 @@ patches:
     file: enc_jis_props_h_signature.patch
   - feature: ext_setup_nodynamic
     file: ext_setup_nodynamic.patch
+  # host build tool: never inherit the exe unicode/subsystem flags (msys
+  # -municode pulls the CRT wWinMain trampoline; the tool is plain main())
+  - feature: defs_gmake_mk_des_tables_hostflags
+    file: defs_gmake_mk_des_tables_hostflags.patch
   - feature: gnumakefile_in_pass1_msys
     file: gnumakefile_in_pass1_msys.patch
   - feature: gnumakefile_in_pass1_msys

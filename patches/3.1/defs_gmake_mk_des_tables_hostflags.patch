@@ -1,0 +1,31 @@
+# defs_gmake_mk_des_tables_hostflags.patch
+#
+# Target:  defs/gmake.mk (all lines, all passes; a no-op off mingw)
+# Source:  new for the v0.2.22 windows pin-leg failure (ruby 4.0.6,
+#          tebako-runtime-ruby run 31786291927)
+#
+# make_des_table is a build-time host tool with a plain main() (crypt.c
+# -DDUMP). The rule links it with $(EXE_LDFLAGS), which carries
+# -municode on mingw (cygwin/GNUmakefile.in: override EXE_LDFLAGS +=
+# $(MUNICODE_FLAG)). With the current mingw-w64 CRT, an unresolved wmain
+# pulls libmingw32's unicode trampoline (ucrtexewin.o), whose wmain calls
+# wWinMain — a console host tool defines neither, so any des_tables.c
+# regen on msys dies at link:
+#   crtexewin.c:62:(.text+0xa5): undefined reference to `wWinMain'
+# The regen fires only on the exts.mk race serial-retry path (clean trees
+# ship des_tables.c fresh enough); the race made it fire for 4.0.6.
+# Strip the unicode/subsystem flags from the host-tool link only; the -L
+# closure and $(LIBS) stay. Off mingw neither flag is present, so the
+# filter-out is a no-op there.
+diff --git a/defs/gmake.mk b/defs/gmake.mk
+--- a/defs/gmake.mk
++++ b/defs/gmake.mk
+@@ -120,7 +120,7 @@
+ 	touch $@
+ else
+ 	@$(ECHO) building make_des_table
+-	$(CC) $(INCFLAGS) $(CPPFLAGS) -DDUMP $(EXE_LDFLAGS) $(XLDFLAGS) $(LIBS) -omake_des_table $(srcdir)/missing/crypt.c
++	$(CC) $(INCFLAGS) $(CPPFLAGS) -DDUMP $(filter-out -municode -mwindows,$(EXE_LDFLAGS)) $(filter-out -municode -mwindows,$(XLDFLAGS)) $(LIBS) -omake_des_table $(srcdir)/missing/crypt.c
+ 	@[ -x ./make_des_table ]
+ 	@$(ECHO) generating $@
+ 	$(Q) $(MAKEDIRS) $(@D)

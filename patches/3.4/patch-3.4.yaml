@@ -13,6 +13,10 @@ patches:
     file: configure_extstatic_bundle_loader_darwin.patch
   - feature: ext_setup_nodynamic
     file: ../3.3/ext_setup_nodynamic.patch
+  # host build tool: never inherit the exe unicode/subsystem flags (msys
+  # -municode pulls the CRT wWinMain trampoline; the tool is plain main())
+  - feature: defs_gmake_mk_des_tables_hostflags
+    file: ../3.1/defs_gmake_mk_des_tables_hostflags.patch
   - feature: gnumakefile_in_pass1_msys
     file: ../3.3/gnumakefile_in_pass1_msys_7.patch
   - feature: gnumakefile_in_pass2_msys
