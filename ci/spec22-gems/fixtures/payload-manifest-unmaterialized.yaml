@@ -1,0 +1,34 @@
+# NEGATIVE-ORACLE variant of payload-manifest.yaml: identical in every
+# field EXCEPT the absent materialize: block. run.sh presses the same
+# probe tree with this manifest into the -unmaterialized image, so the
+# two images carry byte-identical payload content (the tree_hash stamp
+# excludes /__tpkg__/) and differ ONLY in the class-R declaration. The
+# unmaterialized image's sassc-partial leg must still fail with the
+# pinned class-R signature — that is what proves the green flip comes
+# from materialize: and not from a silent jail relaxation. Keep the two
+# manifests in lockstep; if payload-manifest.yaml changes, change this
+# one too (everything but the materialize: block).
+identity:
+  schema_version: 1
+  kind: app
+  name: spec22-gems-probe
+  version: "1.0.0"
+  producer: {tool: spec22-gems, tool_version: "1"}
+  created: "2026-08-15T00:00:00Z"
+  digest:
+    tree_hash: "sha256:0000000000000000000000000000000000000000000000000000000000000000"
+    blob_sha256: "0000000000000000000000000000000000000000000000000000000000000000"
+  signing: {state: unsigned}
+  encryption: {state: none}
+provides:
+  entrypoints:
+    - name: probe
+      path: /probe/probe.rb
+      # Declarative only — the harness execs the freshly built runtime
+      # directly; nothing resolves through this constraint.
+      runtime_requirement: {engine: ruby, constraint: ">= 4.0, < 5.0"}
+  # The probe image is pressed per host (sassc's extension compiles
+  # locally) and never distributed; the platform axis is not what this
+  # acceptance exercises.
+  platforms: universal
+  capabilities: {exec: true, read: true}
