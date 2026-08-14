@@ -9,6 +9,7 @@ module Tfs
   autoload :PatchManifest, "tfs/patch_manifest"
   autoload :PatchSelection, "tfs/patch_selection"
   autoload :SchemaLint, "tfs/schema_lint"
+  autoload :WinmainPairLint, "tfs/winmain_pair_lint"
   autoload :SourcePrep, "tfs/source_prep"
   autoload :HttpGet, "tfs/http_get"
   autoload :RubyReleases, "tfs/ruby_releases"

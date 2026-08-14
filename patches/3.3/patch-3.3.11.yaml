@@ -1,0 +1,12 @@
+# ruby 3.3.11 patch manifest (canonical tfs-ruby layout).
+# Entries apply in listed order. Schema: schema/patches.schema.yml.
+version: "3.3.11"
+patches:
+  # rubyw.exe needs wWinMain (LPWSTR) against the modern mingw CRT.
+  # upstream paired MUNICODE_FLAG on the rubyw link line with the
+  # wmain-based win32/winmain.c at 3.3.7; the patch lives in the .7+
+  # overlays, never the line base (3.3.3-3.3.6 ship the old main()-based
+  # file and link fine unpatched). Missing here broke the v0.2.22 windows
+  # pin legs (undefined wWinMain at the rubyw.exe link).
+  - feature: winmain_c_wwinmain_msys
+    file: ../3.2/winmain_c_wwinmain_msys_7.patch
