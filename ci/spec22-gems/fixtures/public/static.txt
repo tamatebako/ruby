@@ -1,0 +1,1 @@
+spec22-gems static payload 42

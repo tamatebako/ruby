@@ -1,0 +1,9 @@
+// main.scss — the sassc-partial template: the @import is resolved by
+// libsass's OWN C++ importer, which fopen()s partials/_thing.scss on the
+// raw host path (spec 22 class R trigger) — VFS paths are not host-real,
+// so this leg fails with a pinned named error until class R lands.
+@import "partials/thing";
+
+.spec22-gems-main {
+  margin: 0 auto;
+}
