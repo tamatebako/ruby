@@ -1,0 +1,42 @@
+# Payload manifest for the spec22-gems probe image (spec 03), pressed to
+# /__tpkg__/manifest.yaml by run.sh. The digest placeholders are stamped
+# by mkimage at press time (spec 03 §7 fixed-point rule: the tree hash
+# excludes /__tpkg__/; blob_sha256 stays as authored — advisory producer
+# provenance, never a verification input for an embedded manifest).
+#
+# The materialize: block is the spec 22 §4 class-R declaration under
+# test: main.scss and the partial it @imports are files libsass's OWN
+# C++ importer must fopen() on a raw HOST path (the interpreter's
+# patched IO never gets asked). The driver extracts the declared files
+# to the host exec cache at boot; the probe consumes the documented
+# <TEBAKO_EXEC_CACHE>/resources/<image-key>/<P> landing path (spec 22
+# §6). The negative-oracle image presses the SAME tree with
+# payload-manifest-unmaterialized.yaml — the ONLY difference is this
+# block.
+identity:
+  schema_version: 1
+  kind: app
+  name: spec22-gems-probe
+  version: "1.0.0"
+  producer: {tool: spec22-gems, tool_version: "1"}
+  created: "2026-08-15T00:00:00Z"
+  digest:
+    tree_hash: "sha256:0000000000000000000000000000000000000000000000000000000000000000"
+    blob_sha256: "0000000000000000000000000000000000000000000000000000000000000000"
+  signing: {state: unsigned}
+  encryption: {state: none}
+provides:
+  entrypoints:
+    - name: probe
+      path: /probe/probe.rb
+      # Declarative only — the harness execs the freshly built runtime
+      # directly; nothing resolves through this constraint.
+      runtime_requirement: {engine: ruby, constraint: ">= 4.0, < 5.0"}
+  # The probe image is pressed per host (sassc's extension compiles
+  # locally) and never distributed; the platform axis is not what this
+  # acceptance exercises.
+  platforms: universal
+  capabilities: {exec: true, read: true}
+materialize:
+  - /probe/styles/main.scss
+  - /probe/styles/partials/_thing.scss

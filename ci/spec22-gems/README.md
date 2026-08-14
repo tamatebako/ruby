@@ -27,16 +27,43 @@ idempotent and fully deterministic from pinned inputs.
 | `sinatra-fixed` | **GREEN** | classic-style sinatra with the documented payload-side contract `set :app_file, __FILE__`; `Rack::MockRequest` fetches `/static.txt` from the root-derived `public/` (rack's file serving rides ruby's patched IO, so the VFS path reads fine), 200 + byte-exact body, jailed |
 | `sinatra-unfixed` | **expected RED** when gem-loaded `yes` | sinatra 4.x's load-time `caller_files` app_file detection takes the gem's `Kernel#require` hook frame (`CALLERS_TO_IGNORE` rejects rubygems/bundler/zeitwerk frames, not ours): `app_file` misdetects as `…/gems/tebako-runtime-0.9.0.1/lib/tebako-runtime.rb`, `root` derives under the gem's `lib/`, the static fetch 404s. The harness pins that exact signature. If the gem is absent (`gem-loaded no`) the pollution source is gone and the leg must be GREEN — a surprise either way fails the harness |
 | `sassc-main` | **GREEN** | `SassC::Engine.new(File.read("/probe/styles/plain.scss"))` — no imports: ruby's patched IO reads the VFS file, libsass compiles the string; the CSS carries the rule. Nothing touches a host path |
-| `sassc-partial` | **expected RED** today | `SassC::Engine.new(…, filename:, load_paths: ["/probe/styles"])` with `@import "partials/thing"`: libsass's OWN C++ importer `fopen()`s `/probe/styles/partials/_thing.scss` on the raw host path — VFS paths are not host-real — and the engine raises `SassC::SyntaxError: Error: File to import not found or unreadable: partials/thing.` (pinned). This is the **class-R oracle** |
+| `sassc-partial` | **GREEN** (since class R landed) | `SassC::Engine.new(…, filename:, load_paths:)` with `@import "partials/thing"` run against the **materialized** styles tree: the payload manifest declares `materialize:` for `main.scss` + `partials/_thing.scss` (spec 22 §4), the driver extracts them to `<TEBAKO_EXEC_CACHE>/resources/<image-key>/…` at boot, and libsass's C++ importer `fopen()`s REAL host paths (the exec cache lives under the harness scratch, which the jail grants rw). The probe asserts the partial's own rule (`.spec22-gems-thing`, `#c0392b`) is in the CSS |
+| `sassc-partial-unmaterialized` | **expected RED** | the SAME import run against the **negative-oracle image** — the same probe tree pressed with a manifest identical except for the absent `materialize:` key. The importer's `fopen()` of `/probe/styles/partials/_thing.scss` is not host-real and the engine raises `SassC::SyntaxError: Error: File to import not found or unreadable: partials/thing.` (pinned). This is the **class-R mechanism oracle** |
 
 ### The class-R flip contract
 
-`sassc-partial` is expected RED against the in-flight spec 22 class-R work
-(product-repo `materialize:` manifest key + driver boot extraction; see
-`docs/spec/22-runtime-native-interposition.md`). When class R lands, this
-leg flips GREEN — update the pin **in that PR**, never silently. Until
-then a GREEN leg here is a harness failure, exactly like a RED one with
-the wrong signature.
+Class R landed in tamatebako/tebako PR #403 (spec 22 §4: the additive
+`materialize:` payload-manifest key + driver boot-time extraction to the
+host exec cache). `sassc-partial` flipped from the pinned RED oracle to
+GREEN **in this change**, by declaring the styles tree in the probe
+payload's manifest — nothing else moved: the jail spec is byte-identical,
+the import statement is byte-identical, only the consumption paths point
+at the documented `<TEBAKO_EXEC_CACHE>/resources/<image-key>/<P>` landing
+zone (spec 22 §6).
+
+The mechanism is kept honest by `sassc-partial-unmaterialized`: the same
+tree pressed **without** the declaration (the two manifests differ ONLY
+in the `materialize:` block; the payload content hashes identically — the
+mkimage `tree_hash` stamp excludes `/__tpkg__/`). That leg must stay RED
+with the exact pinned signature. So:
+
+- a RED `sassc-partial` → the materialization chain broke (driver,
+  manifest parse, exec-cache extraction) — harness failure;
+- a GREEN `sassc-partial-unmaterialized` → the failure mode vanished
+  WITHOUT the declaration, i.e. the flip came from a silent jail
+  relaxation or transparent host fallback, not from `materialize:` —
+  harness failure;
+- a RED `sassc-partial-unmaterialized` with a DIFFERENT error → the
+  failure surface drifted — harness failure (re-pin deliberately, never
+  silently).
+
+Both verdicts ride on a runtime exe whose driver carries class R: run.sh
+dies early unless `$TEBAKO_REPO/crates/tebako-driver/src/materialize.rs`
+exists, restages the link unit AND the runtime when `TEBAKO_REPO`'s HEAD
+moves, and asserts after the press that the materialized image really
+carries the `materialize:` key (a pre-class-R `tfs` CLI tolerates the
+unknown key at parse but drops it on the `tree_hash` re-serialization)
+and that the oracle image really lacks it.
 
 ## How the probe gems get in (setup legs — press, not proof)
 
@@ -69,14 +96,15 @@ interpreter exe lives outside the image). The harness therefore:
    host clang — ABI match is guaranteed by construction, and a working
    install is itself evidence the packaged rubygems/mkmf stack is whole;
 4. copies the scratch gem home into the probe tree and presses the probe
-   payload image with the release `tfs` CLI (`mkimage --format dwarfs`).
+   payload images with the release `tfs` CLI (`mkimage --format dwarfs`)
+   — the materialized image and the negative-oracle image, same tree.
 
 The two classic-style sinatra apps share `Sinatra::Application` state by
-definition, so the harness runs **three** jailed invocations
-(sinatra-fixed, sinatra-unfixed, sassc) instead of ci/spec22's one; the
-jail and `env -i` shape are identical in each. The bridge
-(`TEBAKO_MOUNT_ROOT` redirect) is used **only** by the un-jailed setup
-leg — the proof legs boot the runtime stock.
+definition, so the harness runs **four** jailed invocations
+(sinatra-fixed, sinatra-unfixed, sassc, sassc-unmaterialized) instead of
+ci/spec22's one; the jail and `env -i` shape are identical in each. The
+bridge (`TEBAKO_MOUNT_ROOT` redirect) is used **only** by the un-jailed
+setup leg — the proof legs boot the runtime stock.
 
 ## Inputs and pins
 
@@ -84,10 +112,14 @@ leg — the proof legs boot the runtime stock.
   wired into `patches/*/patch-*.yaml`) — supplies the patched source tree
   via `tools/apply` + a sha256-pinned mirror, never the release channel.
 - **tamatebako/tebako** at a commit carrying `tebako_fs_mount_of`
-  (`crates/tfs`), staged with `tools/stage_link_unit` (env per
+  (`crates/tfs`) AND the class-R boot materialization
+  (`crates/tebako-driver/src/materialize.rs` — spec 22 §4, PR #403;
+  tebako main carries both), staged with `tools/stage_link_unit` (env per
   AGENTS.md §13: `DWARFS_RS_VCPKG_ROOT`/`VCPKG_ROOT`/`SQFS_SYS_VCPKG_ROOT`,
   `CARGO_NET_GIT_FETCH_WITH_CLI=true`). Default: `../../tebako-wt-spec22-mountof`
-  (override `TEBAKO_REPO`).
+  (override `TEBAKO_REPO`). The release `tfs` CLI that presses the probe
+  images (`TFS_CLI`) must come from a class-R checkout too — see the flip
+  contract above.
 - **tamatebako/tebako-runtime-ruby** (the runtime factory), run from a
   detached git worktree at `origin/main` — its checkout is never mutated
   and its source pin is never bumped: `tools/build_runtime

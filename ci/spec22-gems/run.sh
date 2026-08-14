@@ -9,7 +9,8 @@
 #
 #   1. a patched ruby source tree (this repo's tools/apply),
 #   2. a v2 link unit staged from a tamatebako/tebako checkout that
-#      carries tebako_fs_mount_of,
+#      carries tebako_fs_mount_of AND the class-R boot materialization
+#      (spec 22 §4, tebako PR #403),
 #   3. a runtime (exe + env image) built by the runtime factory against
 #      that LOCAL source mirror and link unit, with the adapter-less
 #      tebako-runtime gem installed from a local gem repo,
@@ -18,17 +19,23 @@
 #      shim rides a tiny setup image) into a scratch gem home — sassc's
 #      native extension is compiled by the runtime's own mkmf through
 #      host clang, guaranteeing ABI match,
-#   5. a probe payload image (fixtures/ + the scratch gem home) pressed
-#      with the release tfs CLI,
-#   6. three jailed invocations of the runtime (one per proof leg group);
+#   5. TWO probe payload images (fixtures/ + the scratch gem home) pressed
+#      with the release tfs CLI: the materialized image declares
+#      materialize: for the styles tree, the negative-oracle image is the
+#      same tree WITHOUT the key,
+#   6. four jailed invocations of the runtime (one per proof leg group);
 #      grep-verdict on the PROBE lines, branching on the gem-loaded
 #      instrumentation leg.
 #
 # The leg matrix and the pinned expected-fail signatures are documented
-# in README.md. The sassc-partial leg is the class-R oracle: it is
-# expected RED today and flips GREEN only in the PR that lands the
-# in-flight class-R work (docs/spec/22 `materialize:` + driver boot
-# extraction) — update the pin there, never silently.
+# in README.md. The sassc-partial leg is the class-R proof: the probe
+# payload declares materialize: for its styles tree (spec 22 §4, tebako
+# PR #403), so the driver extracts it to the host exec cache at boot and
+# libsass's C++ importer fopen()s REAL host paths — the leg is GREEN. The
+# sassc-partial-unmaterialized leg runs the SAME import against the
+# negative-oracle image (the same tree pressed WITHOUT the declaration)
+# and stays RED with the pinned class-R signature: the flip comes from
+# materialize:, never from a silent jail relaxation.
 #
 # Idempotent: existing artifacts under $SCRATCH are reused; delete the
 # scratch dir (or the specific artifact) to force a rebuild. Everything
@@ -42,7 +49,8 @@
 #   CARGO_NET_GIT_FETCH_WITH_CLI=true
 # Overridable:
 #   TEBAKO_REPO    (default: <ecosystem>/tebako-wt-spec22-mountof —
-#                   the checkout carrying tebako_fs_mount_of)
+#                   a checkout carrying tebako_fs_mount_of AND the class-R
+#                   boot materialization: spec 22 §4, tebako PR #403)
 #   FACTORY_REPO   (default: <ecosystem>/tebako-runtime-ruby)
 #   GEM_REPO_DIR   (default: /tmp/tebako-gem-repo — local gem repo with
 #                   the adapter-less tebako-runtime gem; see README.md)
@@ -72,14 +80,16 @@ SASSC_VERSION="2.4.0"
 # prerelease, and `gem install` never auto-selects a prerelease over the
 # released 0.8.2 — the numeric 0.9.0.1 sorts above both (README.md §gem).
 TEBAKO_RUNTIME_GEM="tebako-runtime-0.9.0.1"
-# Pinned failure oracles (spec 14: captured from real runs, then pinned;
-# the class-R PR flips sassc-partial and re-pins HERE, in that PR).
+# Pinned failure oracles (spec 14: captured from real runs, then pinned).
 #   sinatra-unfixed (gem-loaded yes): sinatra 4.x's load-time
 #   caller_files picks the tebako-runtime require-hook frame as app_file,
 #   deriving a wrong root, so the static fetch misses.
 UNFIXED_APP_FILE_RE='/gems/tebako-runtime-0\.9\.0\.1/lib/tebako-runtime\.rb'
-#   sassc-partial: libsass's C++ importer fopen()s the partial on a raw
-#   host path (class R trigger); the VFS path is not host-real.
+#   sassc-partial-unmaterialized: the negative oracle. libsass's C++
+#   importer fopen()s the partial on a raw host path (class R trigger)
+#   and the image declares NO materialize:, so the VFS path is not
+#   host-real — the pinned error must reproduce verbatim. The same import
+#   against the materialized image (sassc-partial leg) is GREEN.
 SASSC_PARTIAL_PIN='SassC::SyntaxError: Error: File to import not found or unreadable: partials/thing.'
 
 PLATFORM_OS="$(uname -s | tr '[:upper:]' '[:lower:]')"
@@ -93,6 +103,8 @@ step() { echo "== spec22-gems step: $*"; }
 die()  { echo "FAIL spec22-gems ($*)" >&2; exit 1; }
 
 [ -x "$TFS_CLI" ] || die "tfs CLI not at $TFS_CLI (build the tebako workspace release)"
+[ -f "$TEBAKO_REPO/crates/tebako-driver/src/materialize.rs" ] \
+  || die "TEBAKO_REPO $TEBAKO_REPO lacks the class-R boot materialization (spec 22 §4, tebako PR #403) — point TEBAKO_REPO at a tebako main checkout carrying it"
 [ -f "$GEM_REPO_DIR/gems/$TEBAKO_RUNTIME_GEM.gem" ] \
   || die "adapter-less gem $TEBAKO_RUNTIME_GEM missing from $GEM_REPO_DIR (README.md §gem)"
 
@@ -112,18 +124,31 @@ if [ ! -f "$SCRATCH/mirror/tfs-ruby-$VERSION-src.tar.gz" ]; then
   ( cd "$SCRATCH/mirror" && shasum -a 256 "tfs-ruby-$VERSION-src.tar.gz" > SHA256SUMS )
 fi
 
-# --- 2. v2 link unit (carries tebako_fs_mount_of) -------------------------
-if [ ! -f "$SCRATCH/link-unit/libtfs.a" ]; then
-  step "stage link unit from $TEBAKO_REPO"
-  [ -d "$TEBAKO_REPO/crates/tfs" ] || die "TEBAKO_REPO $TEBAKO_REPO is not the product checkout"
-  ( cd "$TEBAKO_REPO" && ruby tools/stage_link_unit "$SCRATCH/link-unit" )
-fi
-
-# --- 3. runtime build against the local mirror ----------------------------
+# --- 2. v2 link unit (tebako_fs_mount_of AND the class-R driver) --------
 RUNTIME_PKG="$SCRATCH/runtime-packages/tebako-runtime-local-$VERSION-macos-arm64"
 [ "$PLATFORM_OS" = linux ] && RUNTIME_PKG="$SCRATCH/runtime-packages/tebako-runtime-local-$VERSION-linux-$(uname -m)"
 RUNTIME_EXE="$RUNTIME_PKG"
 RUNTIME_IMAGE="$RUNTIME_PKG.tfs"
+# The staged link unit (and the runtime exe linked from it) is only valid
+# for the TEBAKO_REPO HEAD it was staged from: a moved checkout — e.g. one
+# that newly carries class R — must restage BOTH, or the green
+# sassc-partial leg would run against a driver that predates
+# materialize: and fail for the wrong reason.
+TEBAKO_HEAD="$(git -C "$TEBAKO_REPO" rev-parse HEAD 2>/dev/null || echo unknown)"
+if [ -f "$SCRATCH/link-unit/libtfs.a" ] \
+   && [ "$(cat "$SCRATCH/link-unit/TEBAKO_REPO_HEAD" 2>/dev/null || echo none)" != "$TEBAKO_HEAD" ]; then
+  step "TEBAKO_REPO moved to $TEBAKO_HEAD — restaging link unit and runtime"
+  rm -rf "$SCRATCH/link-unit"
+  rm -f "$RUNTIME_EXE" "$RUNTIME_IMAGE"
+fi
+if [ ! -f "$SCRATCH/link-unit/libtfs.a" ]; then
+  step "stage link unit from $TEBAKO_REPO"
+  [ -d "$TEBAKO_REPO/crates/tfs" ] || die "TEBAKO_REPO $TEBAKO_REPO is not the product checkout"
+  ( cd "$TEBAKO_REPO" && ruby tools/stage_link_unit "$SCRATCH/link-unit" )
+  echo "$TEBAKO_HEAD" > "$SCRATCH/link-unit/TEBAKO_REPO_HEAD"
+fi
+
+# --- 3. runtime build against the local mirror ----------------------------
 FACTORY_WT="$SCRATCH/factory-worktree"
 if [ ! -x "$RUNTIME_EXE" ]; then
   step "factory build $VERSION (local mirror, staged link unit, adapter-less gem)"
@@ -240,27 +265,52 @@ if [ ! -f "$INSTALL_STAMP" ]; then
   touch "$INSTALL_STAMP"
 fi
 
-# --- 5. probe payload image ------------------------------------------------
+# --- 5. probe payload images (the class-R pair) ----------------------------
+# ONE tree, TWO presses: the materialized image declares materialize: for
+# the styles tree; the negative-oracle image carries the same manifest
+# WITHOUT the key. The payload content is byte-identical across the pair
+# (the mkimage tree_hash stamp excludes /__tpkg__/) — the declaration is
+# the ONLY difference, so the leg verdicts isolate materialize: as the
+# flip mechanism.
 PROBE_TREE="$SCRATCH/probe-tree"
 PAYLOAD_IMG="$SCRATCH/probe-gems-$VERSION.tfs"
-if [ ! -f "$PAYLOAD_IMG" ] || [ "$INSTALL_STAMP" -nt "$PAYLOAD_IMG" ] \
+PAYLOAD_IMG_NOMAT="$SCRATCH/probe-gems-$VERSION-unmaterialized.tfs"
+if [ ! -f "$PAYLOAD_IMG" ] || [ ! -f "$PAYLOAD_IMG_NOMAT" ] \
+   || [ "$INSTALL_STAMP" -nt "$PAYLOAD_IMG" ] \
    || [ -n "$(find "$SELF_DIR/fixtures" -newer "$PAYLOAD_IMG" -print -quit 2>/dev/null)" ]; then
-  step "assemble probe tree + press payload image"
+  step "assemble probe tree + press payload images (materialized + negative oracle)"
   rm -rf "$PROBE_TREE"
-  mkdir -p "$PROBE_TREE/probe"
+  mkdir -p "$PROBE_TREE/probe" "$PROBE_TREE/__tpkg__"
   cp -R "$SELF_DIR/fixtures/." "$PROBE_TREE/probe/"
   rm -rf "$PROBE_TREE/probe/gem.rb"  # the setup shim is not a probe fixture
+  rm -f "$PROBE_TREE/probe/payload-manifest.yaml" \
+        "$PROBE_TREE/probe/payload-manifest-unmaterialized.yaml"  # image-root manifests, not probe files
   cp -R "$GEMHOME" "$PROBE_TREE/probe/gemhome"
+  cp "$SELF_DIR/fixtures/payload-manifest.yaml" "$PROBE_TREE/__tpkg__/manifest.yaml"
   rm -f "$PAYLOAD_IMG"
   "$TFS_CLI" mkimage --format "$MKIMAGE_FORMAT" "$PROBE_TREE" --output "$PAYLOAD_IMG" >/dev/null
+  cp "$SELF_DIR/fixtures/payload-manifest-unmaterialized.yaml" "$PROBE_TREE/__tpkg__/manifest.yaml"
+  rm -f "$PAYLOAD_IMG_NOMAT"
+  "$TFS_CLI" mkimage --format "$MKIMAGE_FORMAT" "$PROBE_TREE" --output "$PAYLOAD_IMG_NOMAT" >/dev/null
+  # mkimage re-serializes the manifest when it stamps tree_hash: a tfs CLI
+  # built from a pre-class-R tpkg tolerates the unknown materialize: key
+  # but DROPS it on re-serialization, and the green leg would prove
+  # nothing. Assert the declaration survived the press (and that the
+  # oracle image really lacks it).
+  "$TFS_CLI" cat "$PAYLOAD_IMG" /__tpkg__/manifest.yaml | grep -q "^materialize:" \
+    || die "the pressed image lost the materialize: key — build the tfs CLI from a tebako checkout carrying class R (spec 22 §4, PR #403)"
+  "$TFS_CLI" cat "$PAYLOAD_IMG_NOMAT" /__tpkg__/manifest.yaml | grep -q "^materialize:" \
+    && die "the negative-oracle image carries materialize: — the oracle would prove nothing"
 fi
 
 # --- 6. the jailed proofs ----------------------------------------------------
 # One process per leg group: the two classic-style sinatra apps share
 # Sinatra::Application state by definition, so they run in separate
-# invocations; the two sassc legs share one.
+# invocations; the two sassc legs of an image share one. The
+# sassc-unmaterialized leg runs against the negative-oracle image (same
+# tree, no materialize: declaration) — its own invocation.
 run_probe() {
-  local leg="$1"
+  local leg="$1" img="${2:-$PAYLOAD_IMG}"
   set +e
   env -i \
     HOME="$SCRATCH/home" \
@@ -269,7 +319,7 @@ run_probe() {
     TEBAKO_HOME="$SCRATCH/tebako-home" \
     TEBAKO_RUNTIME_IMAGE="$RUNTIME_IMAGE" \
     TEBAKO_JAIL="deny;$SCRATCH:$SCRATCH:rw" \
-    "$RUNTIME_EXE" --tebako-image "$PAYLOAD_IMG:-:/" --tebako-entry /probe/probe.rb "$leg" \
+    "$RUNTIME_EXE" --tebako-image "$img:-:/" --tebako-entry /probe/probe.rb "$leg" \
     > "$SCRATCH/proof-$leg.log" 2>&1
   local st=$?
   set -e
@@ -278,15 +328,16 @@ run_probe() {
 }
 
 step "jailed probe runs (TEBAKO_JAIL=deny;\$SCRATCH:\$SCRATCH:rw)"
-st_fixed=0; st_unfixed=0; st_sassc=0
+st_fixed=0; st_unfixed=0; st_sassc=0; st_sassc_nomat=0
 run_probe sinatra-fixed   || st_fixed=$?
 run_probe sinatra-unfixed || st_unfixed=$?
 run_probe sassc           || st_sassc=$?
+run_probe sassc-unmaterialized "$PAYLOAD_IMG_NOMAT" || st_sassc_nomat=$?
 
 gem_loaded="$(grep -m1 -oE '^PROBE gem-loaded (yes|no)' "$SCRATCH/proof-sinatra-fixed.log" | awk '{print $3}')"
 [ -n "$gem_loaded" ] || die "gem-loaded instrumentation line missing"
 # every invocation must report the same boot state
-for leg in sinatra-unfixed sassc; do
+for leg in sinatra-unfixed sassc sassc-unmaterialized; do
   other="$(grep -m1 -oE '^PROBE gem-loaded (yes|no)' "$SCRATCH/proof-$leg.log" | awk '{print $3}')"
   [ "$other" = "$gem_loaded" ] || die "gem-loaded disagree across legs ($gem_loaded vs $other in $leg)"
 done
@@ -296,6 +347,10 @@ done
 grep -q "^PROBE sinatra-fixed ok status=200 " "$SCRATCH/proof-sinatra-fixed.log" || die "sinatra-fixed leg"
 [ "$st_sassc" -eq 0 ] || die "sassc leg exit $st_sassc"
 grep -q "^PROBE sassc-main ok " "$SCRATCH/proof-sassc.log" || die "sassc-main leg"
+# the class-R flip: the materialize:-declaring image serves the importer's
+# fopen() from the host exec cache — GREEN is the only acceptable verdict.
+grep -q "^PROBE sassc-partial ok " "$SCRATCH/proof-sassc.log" \
+  || die "sassc-partial leg (expected GREEN via the materialize: declaration, spec 22 §4)"
 
 # red legs — pinned signatures, branched on the instrumentation verdict
 if [ "$gem_loaded" = "yes" ]; then
@@ -307,7 +362,11 @@ else
   grep -q "^PROBE sinatra-unfixed ok status=200 " "$SCRATCH/proof-sinatra-unfixed.log" \
     || die "sinatra-unfixed leg (gem absent: expected GREEN, got a surprise)"
 fi
-grep -qF "PROBE sassc-partial expected-fail $SASSC_PARTIAL_PIN" "$SCRATCH/proof-sassc.log" \
-  || die "sassc-partial leg (expected the pinned class-R failure signature)"
+# the mechanism oracle: the SAME import WITHOUT the declaration must still
+# fail with the pinned class-R signature — a GREEN here means the flip came
+# from a silent jail relaxation, not from materialize:.
+[ "$st_sassc_nomat" -eq 0 ] || die "sassc-unmaterialized leg exit $st_sassc_nomat"
+grep -qF "PROBE sassc-partial-unmaterialized expected-fail $SASSC_PARTIAL_PIN" "$SCRATCH/proof-sassc-unmaterialized.log" \
+  || die "sassc-partial-unmaterialized leg (expected the pinned class-R failure signature)"
 
 echo "SPEC22-GEMS-ACCEPTANCE-OK $VERSION ($RUNTIME_EXE; sinatra $SINATRA_VERSION, sassc $SASSC_VERSION, $TEBAKO_RUNTIME_GEM)"
