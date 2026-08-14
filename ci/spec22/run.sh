@@ -104,6 +104,9 @@ gem: --no-document
 GEMRC
   # fresh src tag per content change: the fetcher caches SHA256SUMS per tag
   tag="$SRC_TAG-$(shasum -a 256 "$SCRATCH/mirror/tfs-ruby-$VERSION-src.tar.gz" | cut -c1-8)"
+  # stock macOS ships bison 2.3; ruby regenerates parse.c (bison >= 3.0)
+  # whenever a patch nudges the dependency graph — prefer homebrew's.
+  [ -x /opt/homebrew/opt/bison/bin/bison ] && export PATH="/opt/homebrew/opt/bison/bin:$PATH"
   ( cd "$FACTORY_WT" && \
     GEMRC="$SCRATCH/gemrc" \
     TEBAKO_RUST_LIBDIR="$SCRATCH/link-unit" \
@@ -113,9 +116,17 @@ GEMRC
       --prefix "$SCRATCH/factory" \
       --output "$RUNTIME_PKG" )
 fi
-RUNTIME_EXE="$RUNTIME_PKG/$(basename "$RUNTIME_PKG")"
+# the factory emits the package in one of two layouts: the SIBLING form
+# (the exe IS $RUNTIME_PKG, the env image $RUNTIME_PKG.tfs beside it) or
+# the DIRECTORY form (a dir holding <basename> + <basename>.tfs).
+if [ -x "$RUNTIME_PKG" ] && [ ! -d "$RUNTIME_PKG" ]; then
+  RUNTIME_EXE="$RUNTIME_PKG"
+  RUNTIME_IMAGE="$RUNTIME_PKG.tfs"
+else
+  RUNTIME_EXE="$RUNTIME_PKG/$(basename "$RUNTIME_PKG")"
+  RUNTIME_IMAGE="$RUNTIME_PKG/$(basename "$RUNTIME_PKG").tfs"
+fi
 [ -x "$RUNTIME_EXE" ] || die "runtime exe missing at $RUNTIME_EXE"
-RUNTIME_IMAGE="$RUNTIME_PKG/$(basename "$RUNTIME_PKG").tfs"
 [ -f "$RUNTIME_IMAGE" ] || die "env image missing at $RUNTIME_IMAGE"
 
 # --- 4. probe payload image ------------------------------------------------
@@ -123,8 +134,16 @@ PROBE_TREE="$SCRATCH/probe-tree"
 PAYLOAD_IMG="$SCRATCH/probe-$VERSION.tfs"
 if [ ! -f "$PAYLOAD_IMG" ]; then
   step "build probe natives + payload image"
-  RB_BUILD_DIR="$(dirname "$(find "$SCRATCH/factory" -name 'ruby.h' -path '*/include/*' 2>/dev/null | head -1)")/.."
-  [ -f "$RB_BUILD_DIR/include/ruby.h" ] || die "ruby build headers not found under $SCRATCH/factory"
+  # the build tree is deps/src/_ruby_$VERSION (headers at include/ruby.h);
+  # a blanket find can land on the deps/stash_* installed-headers copy
+  # (include/ruby-X/ruby.h — one level deeper), which breaks the dirname
+  # arithmetic below. Canonical path first, depth-constrained find as
+  # fallback.
+  RB_BUILD_DIR="$SCRATCH/factory/deps/src/_ruby_$VERSION"
+  if [ ! -f "$RB_BUILD_DIR/include/ruby.h" ]; then
+    RB_BUILD_DIR="$(dirname "$(find "$SCRATCH/factory/deps/src" -mindepth 3 -maxdepth 3 -path '*/include/ruby.h' 2>/dev/null | head -1)")/.."
+  fi
+  [ -f "$RB_BUILD_DIR/include/ruby.h" ] || die "ruby build headers not found under $SCRATCH/factory/deps/src"
   mkdir -p "$PROBE_TREE/probe/lib"
   cp "$SELF_DIR/fixtures/probe.rb" "$PROBE_TREE/probe/"
   PROBE_LIB="/probe/lib/libvfsprobe.$LIBEXT"
@@ -134,8 +153,9 @@ if [ ! -f "$PAYLOAD_IMG" ]; then
     clang -dynamiclib -O2 "$SELF_DIR/fixtures/vfsprobe.c" "$PROBE_TREE/probe/lib/libvfsdep.$LIBEXT" \
       -install_name "@rpath/libvfsprobe.$LIBEXT" -Wl,-rpath,"@loader_path" \
       -o "$PROBE_TREE/probe/lib/libvfsprobe.$LIBEXT"
+    ARCH_DIR="$(basename "$(find "$RB_BUILD_DIR/.ext/include" -mindepth 1 -maxdepth 1 -type d 2>/dev/null | head -1)")"
     clang -bundle -O2 -undefined dynamic_lookup \
-      -I"$RB_BUILD_DIR/include" -I"$RB_BUILD_DIR/.ext/include/arm64-darwin24" \
+      -I"$RB_BUILD_DIR/include" -I"$RB_BUILD_DIR/.ext/include/$ARCH_DIR" \
       -DPROBE_LIB_PATH="\"$PROBE_LIB\"" \
       "$SELF_DIR/fixtures/probe_ext.c" -o "$PROBE_TREE/probe/lib/probe_ext.$EXTEXT"
   else

@@ -25,7 +25,7 @@ diff --git a/dln.c b/dln.c
 index 0edd709..e89fb9e 100644
 --- a/dln.c
 +++ b/dln.c
-@@ -93,6 +93,131 @@ dln_loaderror(const char *format, ...)
+@@ -93,6 +93,136 @@ dln_loaderror(const char *format, ...)
  # define USE_DLN_DLOPEN
  #endif
  
@@ -47,7 +47,12 @@ index 0edd709..e89fb9e 100644
 +   cannot resolve its own original on musl -- no dlvsym).
 +   macOS is excluded: dyld applies __interpose tuples only from dylibs,
 +   never from the main executable, so the macOS interposition is the
-+   driver's self-insertion at boot (crates/tebako-driver), not this TU. */
++   driver's self-insertion at boot (crates/tebako-driver), not this TU.
++   Visibility: ruby compiles dln.c with -fvisibility=hidden (XCFLAGS),
++   exporting upstream symbols via RUBY_SYMBOL_EXPORT pragmas in dln.h;
++   these new definitions must declare default visibility themselves or
++   they stay LOCAL in the exe and cannot preempt (-Wl,-export-dynamic
++   cannot export a hidden symbol). */
 +
 +#include <dlfcn.h>
 +#include <stdio.h>
@@ -140,13 +145,13 @@ index 0edd709..e89fb9e 100644
 +    return real_fn;
 +}
 +
-+void *
++__attribute__((visibility("default"))) void *
 +dlopen(const char *path, int mode)
 +{
 +    return tfs_dlopen_route(path, mode, tfs_real_dlopen());
 +}
 +
-+char *
++__attribute__((visibility("default"))) char *
 +dlerror(void)
 +{
 +    return tfs_dlerror_route(tfs_real_dlerror());

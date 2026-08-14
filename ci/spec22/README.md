@@ -79,3 +79,18 @@ uses the main binary's own `dlopen`/`dlerror` definitions from this
 patch, which preempt process-wide (verify on ELF with
 `nm -D <runtime-exe> | grep ' T dlopen'`). The probe is POSIX-only;
 windows is out of phase-1 scope.
+
+## The ELF leg (linux/amd64, containerized)
+
+`elf/` runs the same four assertions on linux/amd64 (qemu-user on Apple
+Silicon, or any Docker host) — one container, one command:
+
+```sh
+ci/spec22/elf/run-elf-leg.sh
+```
+
+plus the ELF-only gates (`nm -D` export of `dlopen`/`dlerror`; zero
+GNU_UNIQUE in the staged `libtfs.a`). See `elf/README.md` for the layout,
+the container-local deviations (the libjemalloc neuter, the reseal), and
+the reseal procedure. Proven green on ruby 4.0.6 (linux-gnu x86_64):
+`SPEC22-ACCEPTANCE-OK 4.0.6`.
