@@ -107,6 +107,8 @@ jobs:
           bundler-cache: true
       - name: validate manifests against schema
         run: bundle exec tools/validate_manifests
+      - name: validate msys winmain/-municode pairing
+        run: bundle exec tools/validate_msys_pairs
       - name: apply patches
         run: tools/apply "${{ matrix.version }}" "$PWD/build" --platform "${{ matrix.platform }}" --pass "${{ matrix.pass }}"
       - name: package

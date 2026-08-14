@@ -41,5 +41,7 @@ jobs:
           bundler-cache: true
       - name: validate manifests against schema
         run: bundle exec tools/validate_manifests
+      - name: validate msys winmain/-municode pairing
+        run: bundle exec tools/validate_msys_pairs
       - name: git apply --check every selected patch
         run: tools/lint "${{ matrix.version }}"
