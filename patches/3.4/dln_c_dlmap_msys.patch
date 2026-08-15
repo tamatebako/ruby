@@ -1,20 +1,52 @@
 # dln_c_dlmap_msys.patch
 #
 # Target:  dln.c (pass2 (msys))
-# Source:  tebako gem lib/tebako/packager/pass2_patch.rb Pass2Patch#dln_c_patch, patch_literals.rb DLN_C_MSYS_PATCH / DLN_C_MSYS_PATCH_PRE32
+# Source:  tebako gem lib/tebako/packager/pass2_patch.rb Pass2Patch#dln_c_patch, patch_literals.rb DLN_C_MSYS_PATCH / DLN_C_MSYS_PATCH_PRE32;
+#          W2 redesign per docs/spec/22 section 2.1 (windows class L, the
+#          phase-W design; tamatebako/tebako PR #406)
 #
-# msys: route dlopen of memfs paths through the libtfs c_api: a memfs file
-# is first mapped to a host file (tebako_fs_dlmap2file), then converted with
-# rb_w32_mbstr_to_wstr and loaded; host paths convert as-is.
+# msys: route native-library loads of memfs paths through the libtfs c_api.
+# W2 (spec 22 section 2.1) grows the W1 route to the windows class-L target
+# surface, the shim staying decision-only (every mechanic lives behind the
+# c_api in the Rust TFS):
+#  - the bare-name rule: tebako_fs_dlalias2file resolves a name matching a
+#    co-mounted image's library_aliases: entry EXACTLY (verbatim,
+#    case-insensitive) to the alias's boot-materialized absolute path,
+#    BEFORE the Rule-L1 path check; an undeclared or path-carrying name
+#    passes through untouched (host by default);
+#  - the Rule-L1 path route: a covered path materializes via
+#    tebako_fs_dlmap2file (whose closure walk gains the PE import
+#    directory on the Rust side); a covered path the mounts do not hold
+#    answers ENOENT and the host conversion serves it from the host;
+#  - the binding: a covered load carries LOAD_WITH_ALTERED_SEARCH_PATH
+#    (LoadLibraryExW) so the materialized module's own directory leads
+#    the OS search for its import tree (the PE $ORIGIN analogue the
+#    mirrored closure layout feeds);
+#  - the named error (spec 22 section 5): a failed materialization raises
+#    LoadError carrying the verdict line (the library, the mount, the
+#    materialization verdict -- word-for-word the POSIX dlerror
+#    contract); a failed OS load of the materialized copy appends the OS
+#    error text (FormatMessage), never a bare 126. The v1-era bare
+#    "goto failed" is retired.
+# Host paths pass through byte-identical (the upstream conversion and
+# LoadLibraryW are untouched on the passthrough route); ffi and
+# self-loading C extensions are never patched (the per-gem law) -- the
+# declared-alias bare-name surface serves them through the OS's own
+# search (the driver's boot materialization + PATH prepend).
 # libtfs c_api extension (requested): tebako_fs_dlmap2file -- extract a
 # memfs file to a host path, the modern counterpart of the legacy
 # tebako_dlmap2file.
-# X-Redesign: modern-api
+# libtfs c_api extension (requested): tebako_fs_dlalias2file -- the
+# bare-name alias resolution above; the bare-name grammar test (spec 03
+# section 2.5), the alias union, and the spec-23-section-8 lib-load
+# journal verdict all live behind the c_api (this TU stays
+# decision-only).
+# X-Redesign: win32-dln-interpose
 diff --git a/dln.c b/dln.c
-index cd9792c..c6c1ffa 100644
+index cd9792c..0b9e04f 100644
 --- a/dln.c
 +++ b/dln.c
-@@ -76,7 +76,34 @@
+@@ -76,7 +76,67 @@ void *xrealloc();
  # include <unistd.h>
  #endif
  
@@ -42,6 +74,39 @@ index cd9792c..c6c1ffa 100644
 +   tebako_dlmap2file); declared here so this translation unit stays
 +   C99-clean meanwhile */
 +char *tebako_fs_dlmap2file(const char *path);
++
++/* libtfs c_api extension (requested): tebako_fs_mount_of -- the mount
++   point of the longest-prefix mount covering a path (NULL + ENOENT when
++   uncovered), for the verdict line; declared here so this translation
++   unit stays C99-clean meanwhile */
++char *tebako_fs_mount_of(const char *path);
++
++/* libtfs c_api extension (requested, spec 22 section 2.1 -- the windows
++   bare-name rule): tebako_fs_dlalias2file -- a BARE library name (no
++   path separator, no drive qualifier; the grammar test is the c_api's
++   own, spec 03 section 2.5 SSOT) matching a co-mounted image's
++   library_aliases: entry EXACTLY (verbatim, case-insensitive) answers
++   the alias's boot-materialized absolute host path; anything else -- a
++   path-carrying name or an undeclared bare name -- answers NULL +
++   ENOENT (host by default, the name passes through untouched). The
++   spec 23 section 8 lib-load journal verdict is emitted by the c_api
++   side, where the verdict is made. */
++char *tebako_fs_dlalias2file(const char *name);
++
++/* The spec 22 section 5 verdict line for a failed materialization,
++   word-for-word the POSIX leg's dlerror contract: the library, the
++   mount, the materialization verdict. */
++static void
++tfs_dl_verdict(char *buf, size_t size, const char *path)
++{
++    int err = errno;
++    char *mount = tebako_fs_mount_of(path);
++    snprintf(buf, size,
++             "tebako: cannot materialize VFS-resident library '%s' (mount '%s'): %s",
++             path, mount != NULL ? mount : "(unknown)", strerror(err));
++    free(mount);
++    errno = err;
++}
 +/* -- End of tebako patch -- */
 +
  #ifndef dln_loaderror
@@ -49,34 +114,78 @@ index cd9792c..c6c1ffa 100644
  static void
  dln_loaderror(const char *format, ...)
  {
-@@ -350,7 +377,29 @@
+@@ -350,14 +410,72 @@ dln_open(const char *file)
      char message[1024];
  
      /* Convert the file path to wide char */
 -    WCHAR *winfile = rb_w32_mbstr_to_wstr(CP_UTF8, file, -1, NULL);
 +/* -- Start of tebako patch -- */
-+  char *f = NULL;
++  char *f = NULL;  /* the materialized host copy when the load is covered; NULL on a host passthrough */
 +  WCHAR *winfile = NULL;
-+  if (file && tfs_memfs_path_p(file)) {
-+    f = tebako_fs_dlmap2file(file);
-+    if (f) {
-+      winfile = rb_w32_mbstr_to_wstr(CP_UTF8, f, -1, NULL);
-+      free(f);
-+    }
-+    else if (errno == ENOENT) {
-+      /* covered but not held: a host path the "/" mount happens to cover --
-+         the host conversion below serves it from the host */
-+      winfile = rb_w32_mbstr_to_wstr(CP_UTF8, file, -1, NULL);
-+    }
-+    else {
++  if (file != NULL) {
++    /* The bare-name rule first (spec 22 section 2.1): a name matching a
++       co-mounted image's library_aliases: entry EXACTLY (verbatim,
++       case-insensitive) rewrites the call to the alias's
++       boot-materialized absolute path; NULL + ENOENT (a path-carrying
++       or undeclared name -- host by default) falls through to the
++       Rule-L1 route below, untouched. */
++    f = tebako_fs_dlalias2file(file);
++    if (f == NULL && errno != ENOENT) {
++      tfs_dl_verdict(message, sizeof(message), file);
++      error = message;
 +      goto failed;
 +    }
 +  }
-+  else {
-+    winfile = rb_w32_mbstr_to_wstr(CP_UTF8, file, -1, NULL);
++  if (f == NULL && tfs_memfs_path_p(file)) {
++    f = tebako_fs_dlmap2file(file);
++    if (f == NULL && errno != ENOENT) {
++      /* named error (spec 22 sections 2.1/5): the LoadError carries the
++         verdict line -- the library, the mount, the materialization
++         verdict; the v1-era bare goto failed is retired */
++      tfs_dl_verdict(message, sizeof(message), file);
++      error = message;
++      goto failed;
++    }
++    /* ENOENT: covered but not held -- a host path the mount happens to
++       cover; the host conversion below serves it from the host (the
++       jail-gated passthrough precedent) */
 +  }
++  winfile = rb_w32_mbstr_to_wstr(CP_UTF8, f != NULL ? f : file, -1, NULL);
 +/* -- End of tebako patch -- */
 +
      if (!winfile) {
          dln_memerror();
      }
+ 
+     /* Load file */
++/* -- Start of tebako patch -- */
++  if (f != NULL) {
++    /* The binding (spec 22 section 2.1): a covered load carries
++       LOAD_WITH_ALTERED_SEARCH_PATH so the materialized module's own
++       directory leads the OS search for its import tree -- the PE
++       $ORIGIN analogue the mirrored closure layout feeds. A failure
++       carries the verdict line with the OS error text appended (spec 22
++       section 5), never a bare 126. */
++    handle = LoadLibraryExW(winfile, NULL, LOAD_WITH_ALTERED_SEARCH_PATH);
++    if (handle == NULL) {
++      char oserr[sizeof(message)];
++      snprintf(oserr, sizeof(oserr), "%s", dln_strerror());
++      snprintf(message, sizeof(message),
++               "tebako: cannot load materialized VFS-resident library '%s' (host copy '%s'): %s",
++               file, f, oserr);
++      error = message;
++      free(winfile);
++      free(f);
++      goto failed;
++    }
++    free(f);
++  }
++  else {
+     handle = LoadLibraryW(winfile);
+-    free(winfile);
++  }
++  free(winfile);
++/* -- End of tebako patch -- */
+ 
+     if (!handle) {
+         error = dln_strerror();
