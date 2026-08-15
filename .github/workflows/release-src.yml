@@ -39,6 +39,9 @@ jobs:
             # unguarded empty matrix poisons the run conclusion).
             echo "lines_count=$(jq 'length' <<< "$lines")"
           } >> "$GITHUB_OUTPUT"
+          # The line list to the LOG as well (the per-line units re-plan
+          # with git available; this job only lists — v0.2.24 record).
+          echo "plan: tag=$RELEASE_TAG lines=$lines"
 
   # The per-line release units: each line's tip smoke runs FIRST and
   # gates only its own line's builds; copies run independently. A line
