@@ -47,11 +47,12 @@ jobs:
           smoke=$(tools/smoke_matrix "${{ inputs.tag }}" --line "${{ inputs.line }}")
           build=$(tools/build_matrix "${{ inputs.tag }}" --build --line "${{ inputs.line }}")
           copies=$(tools/build_matrix "${{ inputs.tag }}" --copies --line "${{ inputs.line }}")
+          previous_tag=$(tools/build_matrix "${{ inputs.tag }}" --previous-tag)
           {
             echo "smoke=$smoke"
             echo "build=$build"
             echo "copies=$copies"
-            echo "previous_tag=$(tools/build_matrix "${{ inputs.tag }}" --previous-tag)"
+            echo "previous_tag=$previous_tag"
             # Leg counts drive the job-level if: guards (an unguarded
             # empty matrix materializes no legs and poisons the run
             # conclusion — the v0.2.15 lesson, release-src.yml history).
@@ -59,6 +60,15 @@ jobs:
             echo "build_count=$(jq '.include | length' <<< "$build")"
             echo "copies_count=$(jq '.include | length' <<< "$copies")"
           } >> "$GITHUB_OUTPUT"
+          # Mirror the plan to the LOG: values written only to
+          # $GITHUB_OUTPUT leave no diagnosable record when the legs
+          # skip (the v0.2.24 zero-plan failure).
+          echo "plan: line=${{ inputs.line }} tag=${{ inputs.tag }} previous_tag=${previous_tag:-<none>} smoke=$(jq '.include | length' <<< "$smoke") build=$(jq '.include | length' <<< "$build") copies=$(jq '.include | length' <<< "$copies")"
+          if [ -n "$previous_tag" ]; then
+            echo "changed paths ($previous_tag..${{ inputs.tag }}): $(git diff --name-only "$previous_tag..${{ inputs.tag }}" | paste -sd' ' -)"
+          else
+            echo "changed paths: <no previous tag — full build>"
+          fi
 
   # The line tip FIRST: configure the tree of the line's newest version
   # per affected scenario and compile each patched translation unit
