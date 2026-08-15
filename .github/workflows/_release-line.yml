@@ -100,11 +100,16 @@ jobs:
 
   # The line's build legs run ONLY when the tip smoke passed (or was
   # vacuous — nothing about the line's patches changed). A failed smoke
-  # blocks this line's builds and nothing else.
+  # blocks this line's builds and nothing else. The guard is NEGATIVE on
+  # purpose: inside a reusable workflow an if:-skipped job's
+  # needs.<job>.result is neither 'success' nor 'skipped' (the vacuous
+  # case), so the positive form silently skips every build leg — the
+  # v0.2.24 zero-leg failure (runs 31882097562/31893154353/31895485744,
+  # plan logged build=28 yet the matrix never materialized).
   build:
     name: build ${{ inputs.line }} (${{ matrix.version }}${{ matrix.suffix }})
     needs: [plan, smoke]
-    if: ${{ needs.plan.outputs.build_count != '0' && (needs.smoke.result == 'success' || needs.smoke.result == 'skipped') }}
+    if: ${{ needs.plan.outputs.build_count != '0' && needs.smoke.result != 'failure' && needs.smoke.result != 'cancelled' }}
     strategy:
       fail-fast: false
       matrix: ${{ fromJSON(needs.plan.outputs.build) }}
