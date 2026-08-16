@@ -7,9 +7,9 @@
 #   2. a v2 link unit staged from a tamatebako/tebako checkout that
 #      carries tebako_fs_mount_of,
 #   3. a runtime (exe + env image) built by the runtime factory against
-#      that LOCAL source mirror and link unit, with the adapter-less
-#      tebako-runtime gem (ffi/fiddle adapters deleted) installed from a
-#      local gem repo,
+#      that LOCAL source mirror and link unit (post-M2 the factory
+#      installs no tebako-runtime gem — spec 22 phase M2, factory PR
+#      #103),
 #   4. a probe payload image (fixtures/): a VFS-resident native library
 #      with a dependency, a C extension that self-dlopens it, and an
 #      entry probe asserting fiddle + self-dlopen + the named dlerror
@@ -31,8 +31,6 @@
 #   TEBAKO_REPO    (default: <ecosystem>/tebako-wt-spec22-mountof —
 #                   the checkout carrying tebako_fs_mount_of)
 #   FACTORY_REPO   (default: <ecosystem>/tebako-runtime-ruby)
-#   GEM_REPO_DIR   (default: /tmp/tebako-gem-repo — local gem repo with
-#                   the adapter-less tebako-runtime gem; see README.md)
 #   SCRATCH        (default: /tmp/spec22-scratch-<version>)
 #   SRC_TAG        (default: spec22-local-<version>)
 
@@ -45,7 +43,6 @@ ECOSYSTEM="$(cd "$RUBY_REPO/.." && pwd)"
 
 TEBAKO_REPO="${TEBAKO_REPO:-$ECOSYSTEM/tebako-wt-spec22-mountof}"
 FACTORY_REPO="${FACTORY_REPO:-$ECOSYSTEM/tebako-runtime-ruby}"
-GEM_REPO_DIR="${GEM_REPO_DIR:-/tmp/tebako-gem-repo}"
 SCRATCH="${SCRATCH:-/tmp/spec22-scratch-$VERSION}"
 SRC_TAG="${SRC_TAG:-spec22-local-$VERSION}"
 TFS_CLI="${TFS_CLI:-$ECOSYSTEM/tebako/target/release/tfs}"
@@ -61,7 +58,6 @@ step() { echo "== spec22 step: $*"; }
 die()  { echo "FAIL spec22 ($*)" >&2; exit 1; }
 
 [ -x "$TFS_CLI" ] || die "tfs CLI not at $TFS_CLI (build the tebako workspace release)"
-[ -d "$GEM_REPO_DIR/gems" ] || die "adapter-less gem repo missing at $GEM_REPO_DIR (README.md §gem)"
 
 mkdir -p "$SCRATCH"/{mirror,tmp,home,tebako-home}
 export TMPDIR="$SCRATCH/tmp"
@@ -91,24 +87,18 @@ RUNTIME_PKG="$SCRATCH/runtime-packages/tebako-runtime-local-$VERSION-macos-arm64
 [ "$PLATFORM_OS" = linux ] && RUNTIME_PKG="$SCRATCH/runtime-packages/tebako-runtime-local-$VERSION-linux-$(uname -m)"
 FACTORY_WT="$SCRATCH/factory-worktree"
 if [ ! -x "$RUNTIME_PKG" ] && [ ! -e "$RUNTIME_PKG/$(basename "$RUNTIME_PKG")" ]; then
-  step "factory build $VERSION (local mirror, staged link unit, adapter-less gem)"
+  step "factory build $VERSION (local mirror, staged link unit)"
   if [ ! -d "$FACTORY_WT" ]; then
     GIT_EDITOR=true git -C "$FACTORY_REPO" worktree add "$FACTORY_WT" origin/main >/dev/null 2>&1 \
       || GIT_EDITOR=true git -C "$FACTORY_REPO" worktree add "$FACTORY_WT" --detach origin/main >/dev/null
     ( cd "$FACTORY_WT" && bundle install --quiet )
   fi
-  cat > "$SCRATCH/gemrc" <<GEMRC
-:sources:
-  - file://$GEM_REPO_DIR
-gem: --no-document
-GEMRC
   # fresh src tag per content change: the fetcher caches SHA256SUMS per tag
   tag="$SRC_TAG-$(shasum -a 256 "$SCRATCH/mirror/tfs-ruby-$VERSION-src.tar.gz" | cut -c1-8)"
   # stock macOS ships bison 2.3; ruby regenerates parse.c (bison >= 3.0)
   # whenever a patch nudges the dependency graph — prefer homebrew's.
   [ -x /opt/homebrew/opt/bison/bin/bison ] && export PATH="/opt/homebrew/opt/bison/bin:$PATH"
   ( cd "$FACTORY_WT" && \
-    GEMRC="$SCRATCH/gemrc" \
     TEBAKO_RUST_LIBDIR="$SCRATCH/link-unit" \
     TEBAKO_TFS="$TFS_CLI" \
     tools/build_runtime --ruby "$VERSION" \

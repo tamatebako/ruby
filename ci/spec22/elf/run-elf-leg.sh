@@ -14,8 +14,6 @@
 #   $SCRATCH/                       bind mount, host-persistent
 #     ruby/                         THIS repo checkout (the harness rides it)
 #     factory/                      tamatebako/tebako-runtime-ruby checkout
-#     tebako-runtime/               tamatebako/tebako-runtime checkout
-#                                   (@feat/drop-class-l-adapters)
 #     ws/tebako-rs/                 tamatebako/tebako checkout (@feat/tfs-mount-of)
 #     ws/dwarfs-rs/                 tamatebako/dwarfs-rs (+ dwarfs-t submodule)
 #     ws/limnifs/limnifs/           limnifs/limnifs (contract-tests sibling
@@ -57,9 +55,8 @@ else
   echo "   toolchain present — skipping"
 fi
 
-echo "== 3. roll the patched source (mirror) + stage the adapter-less gem repo =="
+echo "== 3. roll the patched source (mirror) =="
 docker exec "$NAME" bash "$ELF/roll-source.sh"
-docker exec "$NAME" bash "$ELF/stage-gem-repo.sh"
 
 echo "== 4. link unit (tfs, tebako-driver, libtfs-preload, tfs-cli) + GNU_UNIQUE gate =="
 docker exec "$NAME" bash "$ELF/build-link-unit.sh"

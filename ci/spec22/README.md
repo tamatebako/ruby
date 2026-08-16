@@ -38,23 +38,8 @@ The probe exits 0 only when all four print `ok`.
   detached git worktree at `origin/main` — its checkout is never mutated
   and its source pin is never bumped: `tools/build_runtime
   --src-mirror file://… --src-release spec22-local-…` consumes the local
-  mirror.
-- **The adapter-less tebako-runtime gem** in a local gem repo (default
-  `/tmp/tebako-gem-repo`, override `GEM_REPO_DIR`). Build it from the
-  spec-22 deletion branch of tamatebako/tebako-runtime:
-
-  ```sh
-  git worktree add ../tebako-runtime-wt-spec22-drop-ff -b feat/drop-class-l-adapters origin/main
-  cd ../tebako-runtime-wt-spec22-drop-ff
-  # ffi/fiddle entries removed from POST_REQUIRE_MAP + adapters deleted (the branch)
-  gem build tebako-runtime.gemspec   # with VERSION temporarily "0.8.2.local"
-  mkdir -p /tmp/tebako-gem-repo/gems && cp tebako-runtime-0.8.2.local.gem /tmp/tebako-gem-repo/gems/
-  gem generate_index --directory /tmp/tebako-gem-repo
-  ```
-
-  The harness points `GEMRC` at that repo, so the factory's
-  `gem install tebako-runtime` resolves the adapter-less build — without
-  publishing anything and without touching `~/.gemrc`.
+  mirror. Post-M2 (factory PR #103) the factory installs no
+  tebako-runtime gem; no local gem repo is needed anywhere.
 
 ## Run
 

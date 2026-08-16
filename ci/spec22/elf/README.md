@@ -24,8 +24,6 @@ on Apple Silicon); the host only runs `run-elf-leg.sh`.
   ruby/                               # THIS repo checkout — the harness rides it
   factory/                            # tamatebako/tebako-runtime-ruby
                                       #   @feat/boot-smoke-loader-interpose
-  tebako-runtime/                     # tamatebako/tebako-runtime
-                                      #   @feat/drop-class-l-adapters (gem 0.8.2)
   ws/tebako-rs/                       # tamatebako/tebako @feat/tfs-mount-of
   ws/dwarfs-rs/                       # tamatebako/dwarfs-rs (+ dwarfs-t submodule)
   ws/limnifs/limnifs/                 # limnifs/limnifs (tebako-rs contract-tests
@@ -49,10 +47,9 @@ Steps: container up → `setup-toolchain.sh` (once; cmake 3.31, clang-19,
 gcc-11, rustup, vcpkg, the libjemalloc neuter below) → `roll-source.sh`
 (rolls `tfs-ruby-4.0.6-src.tar.gz` from this checkout into
 `$SCRATCH/mirror`, guarding the interpose block landed) →
-`stage-gem-repo.sh` (builds the adapter-less gem into a file:// repo +
-`gemrc`) → `build-link-unit.sh` (cargo + `tools/stage_link_unit`, nm
+`build-link-unit.sh` (cargo + `tools/stage_link_unit`, nm
 evidence, preload-deps gate, GNU_UNIQUE gate) → `build-runtime.sh`
-(factory `tools/build_runtime` with `--src-mirror` + `GEMRC`, then the
+(factory `tools/build_runtime` with `--src-mirror`, then the
 nm -D export gate) → `probe.sh` (builds the probe natives from
 `../fixtures/`, packs the payload with the staged `tfs` CLI, runs the exe
 jailed: `TEBAKO_JAIL="deny;$SCRATCH:$SCRATCH:rw"`).

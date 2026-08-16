@@ -1,8 +1,8 @@
 #!/bin/bash
 # env.sh — sourced by every container-side step of the spec22 ELF leg.
 # Layout contract:
-#   $SCRATCH    (bind mount, host-persistent): sources, mirror, gem repo,
-#                               HOME caches, outputs. Default
+#   $SCRATCH    (bind mount, host-persistent): sources, mirror, HOME
+#                               caches, outputs. Default
 #                               /tmp/spec22-linux-scratch (override in the
 #                               env); populate per ci/spec22/elf/README.md.
 #   $LINK_UNIT  (bind mount, host-persistent): the staged link unit.
