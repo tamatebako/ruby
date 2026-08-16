@@ -39,8 +39,8 @@ Patches are grouped by feature family rather than by build phase; the
 `# X-Redesign: modern-api` header note still marks the io-routing family
 (memfs `tebako_*` shims, legacy API flagged for redesign): `main.c`,
 `io.c`, `dir.c`, `file.c`, `util.c`, `dln.c`, `prism_compile.c`, `ruby.c`,
-`win32/file.c`, `win32/win32.c` getcwd, `tool/mkconfig.rb`,
-`gem_prelude.rb`. Everything else (link rules, toolchain compatibility,
+`win32/file.c`, `win32/win32.c` getcwd, `tool/mkconfig.rb`.
+Everything else (link rules, toolchain compatibility,
 rubygems) is build-config.
 
 ## Naming

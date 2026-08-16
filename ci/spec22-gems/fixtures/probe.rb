@@ -34,9 +34,11 @@
 #                      came from somewhere other than materialize:.
 #
 # Every invocation prints the instrumentation line
-# `PROBE gem-loaded yes|no` first — whether the tebako-runtime gem was
-# required at interpreter startup (the patched gem_prelude) — then one
-# PROBE line per leg. The harness (run.sh) pins the exact expectations.
+# `PROBE gem-loaded yes|no` first — whether a tebako-runtime gem got
+# loaded at interpreter startup. Nothing may load it: spec 22 phase M2
+# removed the gem from the env image and the gem_prelude require patch is
+# retired, so the line is a pure canary (a `yes` fails the harness). Then
+# one PROBE line per leg. The harness (run.sh) pins the exact expectations.
 
 GEM_HOME_IN_IMAGE = "/probe/gemhome"
 
