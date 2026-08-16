@@ -1,11 +1,10 @@
 # ci/spec22-gems — spec 22 gem-level acceptance harness (real gems, jailed)
 
 This directory is the **local, reproducible** acceptance proof that real
-gems run correctly inside a packaged tebako ruby runtime with the
-**adapter-less** tebako-runtime gem (v0.9.0, empty require maps — the
-tebako-runtime gem kill, draft PR tamatebako/tebako-runtime#29) loaded at
-boot by the patched gem_prelude. No per-gem require adapters exist
-anywhere in the chain. It closes the two dogfood-coverage gaps flagged by
+gems run correctly inside a packaged tebako ruby runtime with **no
+tebako-runtime gem anywhere** (the gem kill, spec 22 phase M2, factory
+PR #103): no require hook at boot, no per-gem require adapters in any
+layer. It closes the two dogfood-coverage gaps flagged by
 the gem-kill audit: **sassc** (spec 22 class R trigger) and **sinatra**
 (fits no class; payload-side contract) appear in no dogfood closure
 (metanorma 1.16.9, fontist 3.0.10 verified).
@@ -23,9 +22,9 @@ idempotent and fully deterministic from pinned inputs.
 
 | leg | expectation | what it proves |
 |---|---|---|
-| `gem-loaded` | instrumentation (`yes` today) | whether the patched gem_prelude required tebako-runtime at boot; branches the sinatra-unfixed expectation |
+| `gem-loaded` | instrumentation (must be `no`) | no tebako-runtime gem may load at boot (spec 22 phase M2); a `yes` means a gem crept back into the env image and fails the harness loud |
 | `sinatra-fixed` | **GREEN** | classic-style sinatra with the documented payload-side contract `set :app_file, __FILE__`; `Rack::MockRequest` fetches `/static.txt` from the root-derived `public/` (rack's file serving rides ruby's patched IO, so the VFS path reads fine), 200 + byte-exact body, jailed |
-| `sinatra-unfixed` | **expected RED** when gem-loaded `yes` | sinatra 4.x's load-time `caller_files` app_file detection takes the gem's `Kernel#require` hook frame (`CALLERS_TO_IGNORE` rejects rubygems/bundler/zeitwerk frames, not ours): `app_file` misdetects as `…/gems/tebako-runtime-0.9.0.1/lib/tebako-runtime.rb`, `root` derives under the gem's `lib/`, the static fetch 404s. The harness pins that exact signature. If the gem is absent (`gem-loaded no`) the pollution source is gone and the leg must be GREEN — a surprise either way fails the harness |
+| `sinatra-unfixed` | **GREEN** | the same app WITHOUT the fix. Pre-M2 this leg was the pinned RED oracle: with the gem loaded, its `Kernel#require` hook frame polluted sinatra 4.x's load-time `caller_files` app_file detection, `root` derived under the gem's `lib/`, and the static fetch 404d. Post-M2 no such frame exists and the leg must be GREEN — if a gem ever returns, the probe still reports the pollution signature and the harness fails it loud (this row is the sentinel) |
 | `sassc-main` | **GREEN** | `SassC::Engine.new(File.read("/probe/styles/plain.scss"))` — no imports: ruby's patched IO reads the VFS file, libsass compiles the string; the CSS carries the rule. Nothing touches a host path |
 | `sassc-partial` | **GREEN** (since class R landed) | `SassC::Engine.new(…, filename:, load_paths:)` with `@import "partials/thing"` run against the **materialized** styles tree: the payload manifest declares `materialize:` for `main.scss` + `partials/_thing.scss` (spec 22 §4), the driver extracts them to `<TEBAKO_EXEC_CACHE>/resources/<image-key>/…` at boot, and libsass's C++ importer `fopen()`s REAL host paths (the exec cache lives under the harness scratch, which the jail grants rw). The probe asserts the partial's own rule (`.spec22-gems-thing`, `#c0392b`) is in the CSS |
 | `sassc-partial-unmaterialized` | **expected RED** | the SAME import run against the **negative-oracle image** — the same probe tree pressed with a manifest identical except for the absent `materialize:` key. The importer's `fopen()` of `/probe/styles/partials/_thing.scss` is not host-real and the engine raises `SassC::SyntaxError: Error: File to import not found or unreadable: partials/thing.` (pinned). This is the **class-R mechanism oracle** |
@@ -125,35 +124,6 @@ setup leg — the proof legs boot the runtime stock.
   and its source pin is never bumped: `tools/build_runtime
   --src-mirror file://… --src-release spec22-gems-local-…` consumes the
   local mirror.
-- **The adapter-less tebako-runtime gem** in a local gem repo (default
-  `/tmp/tebako-gem-repo`, override `GEM_REPO_DIR`). Build it from the
-  gem-kill branch of tamatebako/tebako-runtime (`feat/empty-require-maps`
-  — the v0.9.0 adapter-less tree; the require-hook mechanism stays, the
-  maps ship empty per spec 22 §7):
-
-  ```sh
-  cd ../tebako-runtime-wt-kill-gem          # the feat/empty-require-maps worktree
-  # temporarily: VERSION = "0.9.0.1" in lib/tebako-runtime/version.rb
-  gem build tebako-runtime.gemspec          # then restore version.rb
-  cp tebako-runtime-0.9.0.1.gem /tmp/tebako-gem-repo/gems/
-  gem generate_index --directory /tmp/tebako-gem-repo
-  ```
-
-  **Why 0.9.0.1 and not a `.local` suffix:** rubygems treats any
-  letter-bearing version suffix as a *prerelease*, and `gem install`
-  never auto-selects a prerelease over a released version — with
-  `0.9.0.local` in the repo, the factory silently installs the released
-  0.8.2 (which still carries the sassc/sinatra adapters) and the
-  acceptance would prove nothing. The numeric fourth segment sorts above
-  both 0.8.2 and the eventual 0.9.0 release without being a prerelease.
-  The harness additionally **asserts the env image carries exactly the
-  pinned gem version** (`tfs find … tebako-runtime-*.gemspec`), so a
-  silent resolution change fails loud instead of passing vacuously.
-
-  The harness points the factory's `GEMRC` at that repo, so its
-  `gem install tebako-runtime` resolves the adapter-less build — without
-  publishing anything and without touching `~/.gemrc`. run.sh dies early
-  if `gems/tebako-runtime-0.9.0.1.gem` is absent.
 - **Probe gems**: `sinatra 4.2.1`, `sassc 2.4.0` (pinned in run.sh;
   resolved from rubygems.org at setup time; sassc has no precompiled
   darwin gem, so its libsass/native extension always compiles locally;

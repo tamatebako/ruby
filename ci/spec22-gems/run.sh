@@ -1,9 +1,11 @@
 #!/bin/bash
 # ci/spec22-gems/run.sh — spec 22 gem-level acceptance harness (POSIX).
 # Proves that real gems — sinatra and sassc — behave correctly inside a
-# packaged tebako ruby runtime, JAILED, with the adapter-less
-# tebako-runtime gem (v0.9.0, empty require maps) loaded at boot: no
-# per-gem require adapters anywhere in the chain.
+# packaged tebako ruby runtime, JAILED, with NO tebako-runtime gem
+# anywhere in the chain (the gem kill, spec 22 phase M2, factory PR
+# #103): no require hook at boot, no per-gem require adapters, no gem in
+# the env image. The gem-loaded instrumentation line is the canary: it
+# must report `no` on every leg, and a `yes` fails the harness loud.
 #
 # Builds, from pinned inputs only (same shape as ci/spec22/run.sh):
 #
@@ -12,8 +14,9 @@
 #      carries tebako_fs_mount_of AND the class-R boot materialization
 #      (spec 22 §4, tebako PR #403),
 #   3. a runtime (exe + env image) built by the runtime factory against
-#      that LOCAL source mirror and link unit, with the adapter-less
-#      tebako-runtime gem installed from a local gem repo,
+#      that LOCAL source mirror and link unit — post-M2 the factory
+#      installs no gem, and this harness ASSERTS the env image carries
+#      no tebako-runtime gemspec,
 #   4. the probe gems INSTALLED BY THE BUILT RUNTIME'S OWN gem tooling
 #      (the env image ships rubygems but no gem binstub, so a GemRunner
 #      shim rides a tiny setup image) into a scratch gem home — sassc's
@@ -24,8 +27,7 @@
 #      materialize: for the styles tree, the negative-oracle image is the
 #      same tree WITHOUT the key,
 #   6. four jailed invocations of the runtime (one per proof leg group);
-#      grep-verdict on the PROBE lines, branching on the gem-loaded
-#      instrumentation leg.
+#      grep-verdict on the PROBE lines, the gem-loaded canary pinned `no`.
 #
 # The leg matrix and the pinned expected-fail signatures are documented
 # in README.md. The sassc-partial leg is the class-R proof: the probe
@@ -52,8 +54,6 @@
 #                   a checkout carrying tebako_fs_mount_of AND the class-R
 #                   boot materialization: spec 22 §4, tebako PR #403)
 #   FACTORY_REPO   (default: <ecosystem>/tebako-runtime-ruby)
-#   GEM_REPO_DIR   (default: /tmp/tebako-gem-repo — local gem repo with
-#                   the adapter-less tebako-runtime gem; see README.md)
 #   SCRATCH        (default: /tmp/spec22-gems-scratch-<version>)
 #   SRC_TAG        (default: spec22-gems-local-<version>)
 
@@ -66,7 +66,6 @@ ECOSYSTEM="$(cd "$RUBY_REPO/.." && pwd)"
 
 TEBAKO_REPO="${TEBAKO_REPO:-$ECOSYSTEM/tebako-wt-spec22-mountof}"
 FACTORY_REPO="${FACTORY_REPO:-$ECOSYSTEM/tebako-runtime-ruby}"
-GEM_REPO_DIR="${GEM_REPO_DIR:-/tmp/tebako-gem-repo}"
 SCRATCH="${SCRATCH:-/tmp/spec22-gems-scratch-$VERSION}"
 SRC_TAG="${SRC_TAG:-spec22-gems-local-$VERSION}"
 TFS_CLI="${TFS_CLI:-$ECOSYSTEM/tebako/target/release/tfs}"
@@ -75,16 +74,7 @@ TFS_CLI="${TFS_CLI:-$ECOSYSTEM/tebako/target/release/tfs}"
 # Exact gem versions under test (recorded in README.md).
 SINATRA_VERSION="4.2.1"
 SASSC_VERSION="2.4.0"
-# The adapter-less gem that MUST be the one installed into the env image.
-# Version note: rubygems treats any letter-bearing suffix (".local") as a
-# prerelease, and `gem install` never auto-selects a prerelease over the
-# released 0.8.2 — the numeric 0.9.0.1 sorts above both (README.md §gem).
-TEBAKO_RUNTIME_GEM="tebako-runtime-0.9.0.1"
-# Pinned failure oracles (spec 14: captured from real runs, then pinned).
-#   sinatra-unfixed (gem-loaded yes): sinatra 4.x's load-time
-#   caller_files picks the tebako-runtime require-hook frame as app_file,
-#   deriving a wrong root, so the static fetch misses.
-UNFIXED_APP_FILE_RE='/gems/tebako-runtime-0\.9\.0\.1/lib/tebako-runtime\.rb'
+# Pinned failure oracle (spec 14: captured from a real run, then pinned).
 #   sassc-partial-unmaterialized: the negative oracle. libsass's C++
 #   importer fopen()s the partial on a raw host path (class R trigger)
 #   and the image declares NO materialize:, so the VFS path is not
@@ -105,8 +95,6 @@ die()  { echo "FAIL spec22-gems ($*)" >&2; exit 1; }
 [ -x "$TFS_CLI" ] || die "tfs CLI not at $TFS_CLI (build the tebako workspace release)"
 [ -f "$TEBAKO_REPO/crates/tebako-driver/src/materialize.rs" ] \
   || die "TEBAKO_REPO $TEBAKO_REPO lacks the class-R boot materialization (spec 22 §4, tebako PR #403) — point TEBAKO_REPO at a tebako main checkout carrying it"
-[ -f "$GEM_REPO_DIR/gems/$TEBAKO_RUNTIME_GEM.gem" ] \
-  || die "adapter-less gem $TEBAKO_RUNTIME_GEM missing from $GEM_REPO_DIR (README.md §gem)"
 
 mkdir -p "$SCRATCH"/{mirror,tmp,home,tebako-home}
 export TMPDIR="$SCRATCH/tmp"
@@ -151,7 +139,7 @@ fi
 # --- 3. runtime build against the local mirror ----------------------------
 FACTORY_WT="$SCRATCH/factory-worktree"
 if [ ! -x "$RUNTIME_EXE" ]; then
-  step "factory build $VERSION (local mirror, staged link unit, adapter-less gem)"
+  step "factory build $VERSION (local mirror, staged link unit)"
   if [ ! -d "$FACTORY_WT" ]; then
     # the scratch dir may have been deleted out from under a registered
     # worktree — prune stale registrations first
@@ -160,15 +148,9 @@ if [ ! -x "$RUNTIME_EXE" ]; then
       || GIT_EDITOR=true git -C "$FACTORY_REPO" worktree add "$FACTORY_WT" --detach origin/main >/dev/null
     ( cd "$FACTORY_WT" && bundle install --quiet )
   fi
-  cat > "$SCRATCH/gemrc" <<GEMRC
-:sources:
-  - file://$GEM_REPO_DIR
-gem: --no-document
-GEMRC
   # fresh src tag per content change: the fetcher caches SHA256SUMS per tag
   tag="$SRC_TAG-$(shasum -a 256 "$SCRATCH/mirror/tfs-ruby-$VERSION-src.tar.gz" | cut -c1-8)"
   ( cd "$FACTORY_WT" && \
-    GEMRC="$SCRATCH/gemrc" \
     TEBAKO_RUST_LIBDIR="$SCRATCH/link-unit" \
     TEBAKO_TFS="$TFS_CLI" \
     tools/build_runtime --ruby "$VERSION" \
@@ -178,16 +160,14 @@ GEMRC
 fi
 [ -x "$RUNTIME_EXE" ] || die "runtime exe missing at $RUNTIME_EXE"
 [ -f "$RUNTIME_IMAGE" ] || die "env image missing at $RUNTIME_IMAGE"
-# The acceptance is meaningless if a silent version resolution installed a
-# gem WITH adapters: assert the env image carries the pinned adapter-less
-# gem (and no other tebako-runtime version). /spec_cache holds quick-specs
-# for every version in the repo index — only …/gems/<api>/specifications/
-# is the installed truth.
-img_gems="$("$TFS_CLI" find "$RUNTIME_IMAGE" 'tebako-runtime-*.gemspec' | grep '^/lib/ruby/gems/' | sort -u)"
-echo "$img_gems" | grep -q "/$TEBAKO_RUNTIME_GEM.gemspec\$" \
-  || die "env image lacks the pinned adapter-less gem $TEBAKO_RUNTIME_GEM (got: $(echo "$img_gems" | tr '\n' ' '))"
-[ "$(echo "$img_gems" | grep -c gemspec)" -eq 1 ] \
-  || die "env image carries more than one tebako-runtime version: $(echo "$img_gems" | tr '\n' ' ')"
+# The gem-kill acceptance: the env image must carry NO tebako-runtime
+# gemspec at all — post-M2 (factory PR #103) the factory installs none,
+# and one showing up means the gem crept back into the pipeline and the
+# gemless proof is void. (The grep may legitimately find nothing; the
+# || true keeps set -e from mistaking the expected absence for a failure.)
+img_gems="$("$TFS_CLI" find "$RUNTIME_IMAGE" 'tebako-runtime-*.gemspec' | grep '^/lib/ruby/gems/' | sort -u || true)"
+[ -z "$img_gems" ] \
+  || die "env image carries a tebako-runtime gemspec — the gem kill regressed: $(echo "$img_gems" | tr '\n' ' ')"
 
 # --- 4. probe gems installed by the runtime's OWN gem tooling -------------
 # The env image ships rubygems (mkmf included) but deliberately no bin/
@@ -336,6 +316,9 @@ run_probe sassc-unmaterialized "$PAYLOAD_IMG_NOMAT" || st_sassc_nomat=$?
 
 gem_loaded="$(grep -m1 -oE '^PROBE gem-loaded (yes|no)' "$SCRATCH/proof-sinatra-fixed.log" | awk '{print $3}')"
 [ -n "$gem_loaded" ] || die "gem-loaded instrumentation line missing"
+# the gem-kill canary: no tebako-runtime gem may load at boot — a `yes`
+# means the gem crept back into the env image (or the prelude survived)
+[ "$gem_loaded" = "no" ] || die "gem-loaded must be no post-M2, got $gem_loaded"
 # every invocation must report the same boot state
 for leg in sinatra-unfixed sassc sassc-unmaterialized; do
   other="$(grep -m1 -oE '^PROBE gem-loaded (yes|no)' "$SCRATCH/proof-$leg.log" | awk '{print $3}')"
@@ -352,16 +335,12 @@ grep -q "^PROBE sassc-main ok " "$SCRATCH/proof-sassc.log" || die "sassc-main le
 grep -q "^PROBE sassc-partial ok " "$SCRATCH/proof-sassc.log" \
   || die "sassc-partial leg (expected GREEN via the materialize: declaration, spec 22 §4)"
 
-# red legs — pinned signatures, branched on the instrumentation verdict
-if [ "$gem_loaded" = "yes" ]; then
-  grep -E "^PROBE sinatra-unfixed expected-fail app_file=\S*$UNFIXED_APP_FILE_RE root=\S* status=404" \
-    "$SCRATCH/proof-sinatra-unfixed.log" >/dev/null \
-    || die "sinatra-unfixed leg (expected the pinned caller_files pollution signature)"
-else
-  # no tebako-runtime frame on the stack: nothing pollutes caller_files
-  grep -q "^PROBE sinatra-unfixed ok status=200 " "$SCRATCH/proof-sinatra-unfixed.log" \
-    || die "sinatra-unfixed leg (gem absent: expected GREEN, got a surprise)"
-fi
+# sinatra-unfixed: post-M2 nothing pollutes caller_files, so the only
+# acceptable verdict is GREEN. If a tebako-runtime gem ever returns, the
+# probe reports the pollution signature (`expected-fail app_file=…`) and
+# this check fails loud — the leg doubles as the stray-gem sentinel.
+grep -q "^PROBE sinatra-unfixed ok status=200 " "$SCRATCH/proof-sinatra-unfixed.log" \
+  || die "sinatra-unfixed leg (gemless image: expected GREEN, got a surprise)"
 # the mechanism oracle: the SAME import WITHOUT the declaration must still
 # fail with the pinned class-R signature — a GREEN here means the flip came
 # from a silent jail relaxation, not from materialize:.
@@ -369,4 +348,4 @@ fi
 grep -qF "PROBE sassc-partial-unmaterialized expected-fail $SASSC_PARTIAL_PIN" "$SCRATCH/proof-sassc-unmaterialized.log" \
   || die "sassc-partial-unmaterialized leg (expected the pinned class-R failure signature)"
 
-echo "SPEC22-GEMS-ACCEPTANCE-OK $VERSION ($RUNTIME_EXE; sinatra $SINATRA_VERSION, sassc $SASSC_VERSION, $TEBAKO_RUNTIME_GEM)"
+echo "SPEC22-GEMS-ACCEPTANCE-OK $VERSION ($RUNTIME_EXE; sinatra $SINATRA_VERSION, sassc $SASSC_VERSION, no tebako-runtime gem)"

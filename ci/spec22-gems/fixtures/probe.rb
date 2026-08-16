@@ -44,8 +44,7 @@ gem_loaded = $LOADED_FEATURES.any? { |f| f.end_with?("/tebako-runtime.rb") }
 puts "PROBE gem-loaded #{gem_loaded ? 'yes' : 'no'}"
 
 # Redirect rubygems at the in-image probe gem home BEFORE requiring any
-# probe gem. The already-activated tebako-runtime spec (env image) is
-# unaffected.
+# probe gem.
 ENV["GEM_HOME"] = GEM_HOME_IN_IMAGE
 ENV["GEM_PATH"] = GEM_HOME_IN_IMAGE
 Gem.clear_paths
