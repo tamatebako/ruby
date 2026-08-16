@@ -91,8 +91,6 @@ patches:
     file: dln_c_loader_interpose.patch
   - feature: file_c_tebako_includes
     file: file_c_tebako_includes.patch
-  - feature: gem_prelude_tebako_runtime
-    file: gem_prelude_tebako_runtime.patch
   - feature: io_c_shims_msys
     file: io_c_shims_msys.patch
   - feature: io_c_tebako_includes
