@@ -184,12 +184,23 @@ The windows-specific mechanics the leg owns:
   converts argv, never env); VFS paths are never converted.
   `--tebako-image C:/…/x.tfs:-:/` parses because the driver splits the
   triple on the LAST two colons.
-- **The bridge tree is reconstituted, not checked out.** The gem-install
-  leg's mount-root bridge (`TEBAKO_MOUNT_ROOT`, same construct as
-  run.sh's `ENV_HOST`) is `tfs extract` of the env image + the devkit's
-  `include/` + the import lib under `lib/`, plus `bin/ruby.exe` (a copy
-  of the runtime exe — rubygems respawns `RbConfig.ruby` per extconf) and
-  the PE-named DLL beside it.
+- **The bridge tree is reconstituted, and host-real via `subst` — no
+  mount-root override.** run.sh's setup leg redirects the mount root with
+  `TEBAKO_MOUNT_ROOT` (the POSIX images grant `mount_root_override`). On
+  msys that mechanism is absent BY DESIGN: configure forces LOAD_RELATIVE
+  (the ruby.c loadpath helper compiles out), so the tarball carries no
+  override manifest and the driver refuses `TEBAKO_MOUNT_ROOT` on msys
+  images (fail-closed). The windows bridge instead relies on two shipped
+  behaviors: the era-2 msys rbconfig already spells
+  `ENV["TEBAKO_MOUNT_ROOT"] || 'A:/t'` (unset → the baked root), and
+  `subst A: <bridge-parent>` makes `A:\t` host-real for the leg's
+  duration — raw C opens (OpenSSL's cert `fopen`, the spawned gcc's
+  `-I`/`-L`) read the bridge through the alias, and rubygems' per-extconf
+  respawn of `A:/t/bin/ruby.exe` plain-boots the bridge's exe copy, whose
+  LOAD_RELATIVE load paths self-root at `A:/t`. The bridge tree itself is
+  `tfs extract` of the env image + the devkit's `include/` + the import
+  lib under `lib/`, plus `bin/ruby.exe` and the PE-named DLL beside it;
+  it lives at `<scratch>/a-drive/t` so the drive letter maps its parent.
 - **The jail spelling.** `TEBAKO_JAIL="deny;<C:/…/scratch>:/host-scratch:rw"`:
   the grammar right-splits, so the drive-colon host path survives; the
   mount side must be `/`-absolute and is informational (enforcement

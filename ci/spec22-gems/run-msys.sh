@@ -112,15 +112,29 @@ img_gems="$("$TFS_CLI" find "$RUNTIME_IMAGE" 'tebako-runtime-*.gemspec' | grep '
 # --- 2. the mount-root bridge tree (setup leg only) -----------------------
 # Same construct as run.sh's ENV_HOST: the gem-install leg's two native
 # consumers (rubygems' OpenSSL add_file on the in-image certs; mkmf's
-# host-gcc compiles) read raw HOST paths under the runtime root, so the
-# leg runs with TEBAKO_MOUNT_ROOT pointed at a host-real tree. On msys the
-# tree is RECONSTITUTED from the shipped artifacts (no factory checkout):
-# `tfs extract` of the env image + the devkit's include/ + the import
-# library where rbconfig's libdir expects it. bin/ruby.exe is a copy of
-# the runtime exe (rubygems respawns RbConfig.ruby = <prefix>/bin/ruby.exe
-# per extconf; the exe falls through to a plain interpreter boot with no
-# --tebako-* flags) plus the PE-named DLL its imports resolve.
-ENV_HOST="$SCRATCH/env-host"
+# host-gcc compiles) read raw HOST paths under the runtime root. POSIX
+# solves this with TEBAKO_MOUNT_ROOT — the driver re-mounts the env image
+# at a host-real tree whose layout grants mount_root_override. On msys
+# that mechanism does not exist BY DESIGN: configure forces LOAD_RELATIVE
+# (the ruby.c loadpath helper compiles out), so the tarball carries no
+# override manifest and the image grant stays closed. The windows bridge
+# needs no override at all:
+#   * the era-2 msys rbconfig already spells prefix/exec-prefix as
+#     ENV["TEBAKO_MOUNT_ROOT"] || 'A:/t' — with the env unset, every
+#     rbconfig-derived path is A:/t/...;
+#   * `subst A: <bridge-parent>` makes the baked root HOST-REAL — A:\t IS
+#     the bridge — so raw C opens (OpenSSL's fopen, the spawned gcc's
+#     -I/-L) read the bridge through the drive-letter alias;
+#   * rubygems respawns RbConfig.ruby (= A:/t/bin/ruby.exe) per extconf:
+#     the bridge's exe copy plain-boots (no --tebako-* flags) and
+#     LOAD_RELATIVE self-roots its load paths at A:/t — the subst serves
+#     those reads too. The bridge must therefore live at <parent>/t.
+# The tree is RECONSTITUTED from the shipped artifacts (no factory
+# checkout): `tfs extract` of the env image + the devkit's include/ + the
+# import library where rbconfig's libdir expects it. bin/ruby.exe is a
+# copy of the runtime exe plus the PE-named DLL its imports resolve.
+ENV_HOST_PARENT="$SCRATCH/a-drive"
+ENV_HOST="$ENV_HOST_PARENT/t"
 if [ ! -f "$ENV_HOST/.bridge-$VERSION" ]; then
   step "reconstitute the mount-root bridge tree (tfs extract + devkit)"
   rm -rf "$ENV_HOST"
@@ -161,6 +175,11 @@ if [ ! -f "$INSTALL_STAMP" ]; then
   step "gem install sinatra:$SINATRA_VERSION sassc:$SASSC_VERSION via the staged runtime"
   rm -rf "$GEMHOME" "$SCRATCH/gembin"
   mkdir -p "$SCRATCH/spec_cache"
+  # The bridge goes host-real at the baked root for THIS leg only (the
+  # section-2 comment): A:\t == the bridge. Scoped — created here,
+  # deleted right after the run; the proof legs never see the alias.
+  cmd //c subst A: "$(cygpath -w "$ENV_HOST_PARENT")" >/dev/null \
+    || die "subst A: onto $ENV_HOST_PARENT failed — is A: already taken?"
   set +e
   env -i \
     HOME="$(w "$SCRATCH/home")" \
@@ -172,7 +191,6 @@ if [ ! -f "$INSTALL_STAMP" ]; then
     COMSPEC='C:\Windows\System32\cmd.exe' \
     TEBAKO_HOME="$(w "$SCRATCH/tebako-home")" \
     TEBAKO_RUNTIME_IMAGE="$(w "$RUNTIME_IMAGE")" \
-    TEBAKO_MOUNT_ROOT="$(w "$ENV_HOST")" \
     GEM_SPEC_CACHE="$(w "$SCRATCH/spec_cache")" \
     "$RUNTIME_EXE" --tebako-image "$(w "$SETUP_IMG"):-:/" --tebako-entry /setup/gem.rb \
       install "sinatra:$SINATRA_VERSION" "sassc:$SASSC_VERSION" \
@@ -180,6 +198,7 @@ if [ ! -f "$INSTALL_STAMP" ]; then
       > "$SCRATCH/install.log" 2>&1
   gem_status=$?
   set -e
+  cmd //c subst A: //D >/dev/null 2>&1 || true
   cat "$SCRATCH/install.log"
   [ "$gem_status" -eq 0 ] || die "gem install leg (see $SCRATCH/install.log)"
   grep -q "Successfully installed sinatra-$SINATRA_VERSION" "$SCRATCH/install.log" \
