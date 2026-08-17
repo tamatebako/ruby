@@ -95,6 +95,26 @@ and verified with `git apply --check` on `config.status` files produced by a
 default `./configure` of each claimed version on macOS (arm64). Context lines
 may differ on hosts with different configure flags or platforms.
 
+## Reproducible tarballs
+
+Every tarball this repo ships or rolls for a chain — the release assets
+(`_release-line.yml`), the spec-22 chain mirrors (`ci/spec22/`,
+`ci/spec22-gems/`) — is packed with **all tar metadata clamped**
+(`tar --sort=name --mtime=@0 --owner=0 --group=0 --numeric-owner`; the gzip
+header is already MTIME=0 through the pipe). The tarball sha256 is
+content-addressed: identical patched trees MUST package to identical bytes.
+
+Downstream consumers key their build caches and their platform-skip
+decisions on that sha256 (the consumer-side owner of that architecture is
+`tamatebako/tebako-runtime-ruby`, `docs/build-chain.md`). A plain
+`tar -czf` stamps checkout-time mtimes and readdir member order, so the
+same content rolls to a different sha on every run — cold-caching every
+downstream build leg for changes that touched nothing it reads. Never
+reintroduce one, and never add timestamps, absolute paths, or host
+identifiers to anything `tools/apply` writes into the tree. The local
+harness scripts tolerate bsdtar (macOS) without the clamp flags: their
+mirror is single-machine scratch consumed in the same run.
+
 ## Placeholders
 
 The gem computes the tebako static library list (`MAINLIBS`) dynamically per

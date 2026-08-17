@@ -14,6 +14,15 @@ RUBY_SRC="${RUBY_SRC:-$(cd "$(dirname "${BASH_SOURCE[0]}")/../../.." && pwd)}"
 
 MIRROR="$SCRATCH/mirror"
 mkdir -p "$MIRROR" "$SCRATCH/pristine"
+# Deterministic-roll contract (README § "Reproducible tarballs"): identical
+# content must roll to identical bytes — the tarball sha feeds downstream
+# caches. GNU tar clamps all metadata; bsdtar (local macOS runs) cannot —
+# acceptable here: the local mirror is single-machine scratch consumed in
+# the same run.
+DET_TAR=()
+if tar --version 2>/dev/null | grep -qi gnu; then
+  DET_TAR=(--sort=name --mtime=@0 --owner=0 --group=0 --numeric-owner)
+fi
 for v in $VERSIONS; do
   work="$SCRATCH/.roll-work/$v"
   rm -rf "$work"
@@ -21,7 +30,7 @@ for v in $VERSIONS; do
   # The chain gate's whole point: the interpose block MUST be in the roll.
   grep -q tfs_dlopen_route "$work/tfs-ruby-$v-src/dln.c" || {
     echo "$v: rolled WITHOUT the loader-interpose block"; exit 1; }
-  tar -czf "$MIRROR/tfs-ruby-$v-src.tar.gz" -C "$work" "tfs-ruby-$v-src"
+  tar "${DET_TAR[@]}" -czf "$MIRROR/tfs-ruby-$v-src.tar.gz" -C "$work" "tfs-ruby-$v-src"
   rm -rf "$work"
   echo "rolled $v"
 done

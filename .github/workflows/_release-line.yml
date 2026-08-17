@@ -130,8 +130,14 @@ jobs:
         run: tools/apply "${{ matrix.version }}" "$PWD/build" --platform "${{ matrix.platform }}" --pass "${{ matrix.pass }}"
       - name: package
         working-directory: build
+        # Deterministic roll (README § "Reproducible tarballs"): the
+        # published asset's sha256 is content-addressed — identical patched
+        # trees must package to identical bytes, or downstream caches and
+        # re-cut provenance break. Clamp all tar metadata; the gzip header
+        # is already MTIME=0 via the pipe. ubuntu runner ⇒ GNU tar.
         run: |
-          tar -czf "${{ matrix.asset }}" "${{ matrix.tree }}"
+          tar --sort=name --mtime=@0 --owner=0 --group=0 --numeric-owner \
+            -czf "${{ matrix.asset }}" "${{ matrix.tree }}"
           sha256sum "${{ matrix.asset }}" > "${{ matrix.asset }}.sha256"
       - name: extract-verify
         working-directory: build
