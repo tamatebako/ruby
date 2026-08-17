@@ -62,3 +62,26 @@ step("popen2e") do
     # of the child's verdict).
   end.tap { |st| raise "child exit #{st.exitstatus}" unless st.success? }
 end
+
+# The eleventh dogfood incident: the install leg's rubygems respawn of
+# `make` died "No such file or directory - make" with the msys make
+# package INSTALLED on the job and its /usr/bin on the env -i PATH.
+# Absolute VFS paths spawn fine (rbconfig-ruby above); the bare-name
+# PATH search through the VFS is the suspect. This step names the
+# failing primitive per tool: can the VFS stat the exe at each PATH
+# entry (visibility), and does bare-name spawn work (lookup+exec)?
+step("host-tools") do
+  paths = ENV.fetch("PATH").split(File::PATH_SEPARATOR)
+  %w[make gcc g++ sh].each do |tool|
+    hits = paths.map { |d| File.join(d, "#{tool}.exe") }
+    found = hits.find { |p| File.file?(p) }
+    puts "PROBE-PIPE host-tool #{tool} resolved=#{found || "NONE"}"
+    begin
+      pid = spawn(tool, "--version", [:out, :err] => File::NULL)
+      Process.wait(pid)
+      puts "PROBE-PIPE host-tool #{tool} spawn exit=#{$?.exitstatus}"
+    rescue SystemCallError => e
+      puts "PROBE-PIPE host-tool #{tool} spawn FAIL #{e.class}: #{e.message}"
+    end
+  end
+end
