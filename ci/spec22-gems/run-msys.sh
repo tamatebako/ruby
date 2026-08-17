@@ -165,6 +165,8 @@ if [ ! -f "$INSTALL_STAMP" ]; then
   env -i \
     HOME="$(w "$SCRATCH/home")" \
     TMPDIR="$(w "$SCRATCH/tmp")" \
+    TMP="$(w "$SCRATCH/tmp")" \
+    TEMP="$(w "$SCRATCH/tmp")" \
     PATH="$(w "$UCRT64_BIN");$(w /usr/bin);C:/Windows/System32" \
     SystemRoot='C:\Windows' \
     COMSPEC='C:\Windows\System32\cmd.exe' \
@@ -222,15 +224,20 @@ fi
 # the drive-colon host path survives (`C:/…:/host-scratch:rw` parses
 # host=`C:/…`); the mount side must be /-absolute and is informational —
 # enforcement matches HOST path prefixes (tfs policy). The scratch grant
-# covers HOME/TMPDIR/TEBAKO_HOME and the driver's exec cache (class R's
-# materialization landing); the platform floor (spec 08 §2.1: System32,
-# SysWOW64, Fonts) is granted implicitly under deny.
+# covers HOME/TMP/TEMP/TEBAKO_HOME and the driver's exec cache (class R's
+# materialization landing — the driver's std::env::temp_dir() on windows
+# is GetTempPath2W, which reads TMP/TEMP/USERPROFILE, NEVER TMPDIR: pin
+# TMP+TEMP into the scratch or the cache lands in C:\Windows and the
+# jail denies it); the platform floor (spec 08 §2.1: System32, SysWOW64,
+# Fonts) is granted implicitly under deny.
 run_probe() {
   local leg="$1" img="${2:-$PAYLOAD_IMG}"
   set +e
   env -i \
     HOME="$(w "$SCRATCH/home")" \
     TMPDIR="$(w "$SCRATCH/tmp")" \
+    TMP="$(w "$SCRATCH/tmp")" \
+    TEMP="$(w "$SCRATCH/tmp")" \
     PATH='C:/Windows/System32' \
     SystemRoot='C:\Windows' \
     TEBAKO_HOME="$(w "$SCRATCH/tebako-home")" \
