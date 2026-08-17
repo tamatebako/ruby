@@ -70,8 +70,17 @@ end
 # PATH search through the VFS is the suspect. This step names the
 # failing primitive per tool: can the VFS stat the exe at each PATH
 # entry (visibility), and does bare-name spawn work (lookup+exec)?
+# Round one printed NONE+ENOENT for ALL FOUR tools — so first dump the
+# PATH the runtime actually sees, plus two controls: the VFS mount path
+# itself (must be true) and the PATH's third entry's known host file
+# (C:/Windows/System32/cmd.exe). vfs true + cmd false => the VFS serves
+# NO host path; vfs true + cmd true + tools NONE => the msys64 dirs
+# specifically are invisible (path-form, not policy).
 step("host-tools") do
   paths = ENV.fetch("PATH").split(File::PATH_SEPARATOR)
+  puts "PROBE-PIPE path=#{ENV.fetch("PATH")}"
+  puts "PROBE-PIPE control vfs-ruby=#{File.file?("A:/t/bin/ruby.exe")} " \
+       "host-cmd=#{File.file?("C:/Windows/System32/cmd.exe")}"
   %w[make gcc g++ sh].each do |tool|
     hits = paths.map { |d| File.join(d, "#{tool}.exe") }
     found = hits.find { |p| File.file?(p) }
