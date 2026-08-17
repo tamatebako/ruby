@@ -9,10 +9,12 @@ the gem-kill audit: **sassc** (spec 22 class R trigger) and **sinatra**
 (fits no class; payload-side contract) appear in no dogfood closure
 (metanorma 1.16.9, fontist 3.0.10 verified).
 
-It is deliberately **not** wired into CI, same as `ci/spec22` (whose
-class-L harness it reuses as the build template): it needs the three
-repos on one machine plus a compiled runtime. Run it by hand; it is
-idempotent and fully deterministic from pinned inputs.
+The POSIX harness (`run.sh`) is deliberately **not** wired into CI, same
+as `ci/spec22` (whose class-L harness it reuses as the build template):
+it needs the three repos on one machine plus a compiled runtime. Run it
+by hand; it is idempotent and fully deterministic from pinned inputs.
+(The windows leg, `run-msys.sh`, IS CI-consumed — the factory's windows
+dogfood job runs it against CI-built artifacts; see the last section.)
 
 ## The leg matrix (fixtures/probe.rb, jailed)
 
@@ -151,3 +153,52 @@ reused across runs by design). Per-leg proof output lands in
 `ci/spec22` (the phase-1 class-L harness) is untouched by this addition;
 the two harnesses share the input pins and the scratch layout conventions
 but no state.
+
+## The windows leg (`run-msys.sh`, msys only)
+
+`run-msys.sh` is the same acceptance on windows (spec 22 §8's last row:
+the suite green with the gem gone on **every** published platform). Same
+fixtures, same four jailed legs, same pinned PROBE lines — but it builds
+nothing: the runtime arrives as the factory's CI artifacts and the
+press/extract tooling is the published windows `tfs` CLI. On msys the
+POSIX harness's roll → link-unit → factory-build chain would re-run the
+factory's own CI on a slower footing; the release gate wants the SHIPPED
+shape exercised.
+
+Inputs (env): `RUNTIME_PKG_DIR` (the factory `runtime-packages-windows-*`
+artifact extracted), `DEVKIT_DIR` (the factory `devkit-windows-*`
+artifact — the stash `include/` the env image omits plus
+`lib/libx64-ucrt-ruby<ABI>.dll.a`, the import library an msys native
+extension links), `TFS_CLI` (the published `tfs-…-windows-ucrt64.exe`).
+Overridable: `SCRATCH`, `UCRT64_BIN` (the gem-install leg's gcc/make
+source — default the setup-msys2 location).
+
+The windows-specific mechanics the leg owns:
+
+- **The PE-named DLL.** The artifact carries the ruby DLL under the
+  unique package name; the exe's imports resolve only
+  `x64-ucrt-ruby<ABI>.dll` next to the exe. The leg materializes the copy
+  (the same rule the factory's boot smoke runs).
+- **Path discipline.** The runtime exe and `tfs.exe` are native windows
+  binaries: env values crossing into them are `cygpath -m`'d (msys bash
+  converts argv, never env); VFS paths are never converted.
+  `--tebako-image C:/…/x.tfs:-:/` parses because the driver splits the
+  triple on the LAST two colons.
+- **The bridge tree is reconstituted, not checked out.** The gem-install
+  leg's mount-root bridge (`TEBAKO_MOUNT_ROOT`, same construct as
+  run.sh's `ENV_HOST`) is `tfs extract` of the env image + the devkit's
+  `include/` + the import lib under `lib/`, plus `bin/ruby.exe` (a copy
+  of the runtime exe — rubygems respawns `RbConfig.ruby` per extconf) and
+  the PE-named DLL beside it.
+- **The jail spelling.** `TEBAKO_JAIL="deny;<C:/…/scratch>:/host-scratch:rw"`:
+  the grammar right-splits, so the drive-colon host path survives; the
+  mount side must be `/`-absolute and is informational (enforcement
+  matches host prefixes). The platform floor (spec 08 §2.1: System32,
+  SysWOW64, Fonts) is implicit under `deny`. The proof legs run WITHOUT
+  the toolchain on PATH — a payload needs no compiler at run time.
+
+Verdict: `SPEC22-GEMS-MSYS-ACCEPTANCE-OK <version>`; per-leg proof output
+in `<scratch>/proof-<leg>.log`, the install transcript in
+`<scratch>/install.log`. Consumed by the factory's windows dogfood job
+(tebako-runtime-ruby), which fetches the artifacts and exports the
+inputs; runnable by hand on any msys shell with the same inputs.
