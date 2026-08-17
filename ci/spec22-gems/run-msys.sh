@@ -30,10 +30,12 @@
 #                     an msys native extension links against)
 #   TFS_CLI         — the published windows tfs.exe (press + extract)
 # Overridable:
-#   SCRATCH     (default: /tmp/spec22-gems-msys-scratch-<version>)
+#   SCRATCH     (default: /tmp/spec22-gems-msys-scratch-<version>;
+#               POSIX spelling — it rides the conv_envvars below)
 #   UCRT64_BIN  (default: /d/a/_temp/msys64/ucrt64/bin — the
 #               setup-msys2 location; the gem-install leg's PATH source
-#               for gcc/make, exactly what the factory builds with)
+#               for gcc/make, exactly what the factory builds with;
+#               POSIX spelling — it rides PATH, a conv_envvar)
 #
 # Path discipline: the runtime exe, tfs.exe, and cmd.exe are NATIVE
 # windows binaries, and msys bash's AUTOMATIC argv conversion is the
@@ -43,24 +45,37 @@
 # cmd-style flags. So this script disables it outright
 # (MSYS2_ARG_CONV_EXCL='*'): NOTHING is auto-converted, and every
 # argument to a native binary is spelled in final form BY HAND —
-# host paths through cygpath -m (the w() helper, same as every
-# exported env value: TEBAKO_*, HOME, TMP*, GEM_*), VFS paths
+# host paths through cygpath -m (the w() helper), VFS paths
 # (/--spellings inside images) raw, cmd flags raw (/c, /D).
 # msys-to-msys spawns (find/cp/grep/…) are unaffected either way.
 # SUBTLETY: the scrubbed legs run the exe through `env -i`, which strips
 # the exported copy — the conversion decision belongs to the DIRECT
 # spawner (env, not bash), so MSYS2_ARG_CONV_EXCL rides INSIDE every
 # env -i list too (env sets it into its own environ before the exec).
-# And the ARG knob has a SIBLING: MSYS2_ENV_CONV_EXCL governs the msys
-# runtime's ENVIRONMENT-variable path conversion — a separate heuristic
-# that rewrites the VALUES of known path-list variables (PATH, HOME,
-# TMP, …) when an msys process spawns a native one. It split the
-# pre-converted windows PATH on ':' as bogus POSIX list separators
-# (`D:/a/…` → `D;A:\…` via the /x/→X:\ mapping; `C:/Windows/System32` →
-# `C;<install-root>/Windows/System32`) — the eleventh dogfood incident:
-# every entry nonexistent, so mkmf's bare-name `make` spawn went ENOENT
-# with make installed. `*` excludes all variables; the harness's
-# cygpath-m discipline above already spells every value in final form.
+#
+# The ENVIRONMENT side has TWO msys conversion layers and they take
+# OPPOSITE spellings from this harness (msys2-runtime environ.cc):
+#  1. conv_envvars — PATH, HOME, LD_LIBRARY_PATH, ORIGINAL_PATH, SHELL,
+#     TMPDIR, TMP, TEMP — are converted posix→win32 UNCONDITIONALLY
+#     when an msys process spawns a native one (cygwin's invariant: a
+#     process's own environ holds these in POSIX form, always). The
+#     eleventh dogfood incident fed them cygpath-m windows values:
+#     build_env split `D:/a/…;D:/a/…;C:/Windows/System32` on ':' as
+#     bogus POSIX list separators and mapped each fragment
+#     (`D` + `/a/…`→`A:\…`; `C` + `/Windows/…`→`<install-root>\Windows\…`),
+#     so every PATH entry was nonexistent and mkmf's bare-name `make`
+#     spawn went ENOENT with make installed. MSYS2_ENV_CONV_EXCL does
+#     NOT reach this layer. So the five are spelled in POSIX form below
+#     (no w(); SCRATCH/UCRT64_BIN are already posix) and the boundary
+#     converts them — the runtime receives the same win32 values the
+#     cygpath-m spelling intended.
+#  2. The HEURISTIC layer rewrites the VALUES of every OTHER variable
+#     that looks like a path list. MSYS2_ENV_CONV_EXCL='*' disables it
+#     entirely; it rides inside every env -i list chiefly because
+#     TEBAKO_JAIL's grammar is a colon-list (`deny;<win32>:/host-scratch:rw`)
+#     the heuristic would mangle. All non-conv values (TEBAKO_*,
+#     USERPROFILE, APPDATA, SystemRoot, COMSPEC, GEM_*) keep their
+#     cygpath-m windows spellings and pass through verbatim.
 #
 # Env discipline: `env -i` proves the runtime needs nothing from the host
 # ENVIRONMENT — but on windows there is a floor. A custom env block below
@@ -106,7 +121,9 @@ SASSC_PARTIAL_PIN='SassC::SyntaxError: Error: File to import not found or unread
 step() { echo "== spec22-gems-msys step: $*"; }
 die()  { echo "FAIL spec22-gems-msys ($*)" >&2; exit 1; }
 # Native-windows (mixed) spelling for values that cross the env/argv
-# boundary into the runtime exe or tfs.exe.
+# boundary into the runtime exe or tfs.exe. ARGV and NON-conv env values
+# only — PATH/HOME/TMPDIR/TMP/TEMP (msys's conv_envvars) must stay
+# POSIX, see the header comment.
 w()    { cygpath -m "$1"; }
 
 [ -x "$TFS_CLI" ] || [ -f "$TFS_CLI" ] || die "tfs CLI not at $TFS_CLI (download the tebako release's windows tfs.exe)"
@@ -222,11 +239,11 @@ env_probe() {
   env -i \
     MSYS2_ARG_CONV_EXCL='*' \
     MSYS2_ENV_CONV_EXCL='*' \
-    HOME="$(w "$SCRATCH/home")" \
-    TMPDIR="$(w "$SCRATCH/tmp")" \
-    TMP="$(w "$SCRATCH/tmp")" \
-    TEMP="$(w "$SCRATCH/tmp")" \
-    PATH='C:/Windows/System32' \
+    HOME="$SCRATCH/home" \
+    TMPDIR="$SCRATCH/tmp" \
+    TMP="$SCRATCH/tmp" \
+    TEMP="$SCRATCH/tmp" \
+    PATH='/c/Windows/System32' \
     SystemRoot='C:\Windows' \
     "$@" \
     TEBAKO_RUNTIME_IMAGE="$(w "$RUNTIME_IMAGE")" \
@@ -283,11 +300,11 @@ if [ ! -f "$INSTALL_STAMP" ]; then
   env -i \
     MSYS2_ARG_CONV_EXCL='*' \
     MSYS2_ENV_CONV_EXCL='*' \
-    HOME="$(w "$SCRATCH/home")" \
-    TMPDIR="$(w "$SCRATCH/tmp")" \
-    TMP="$(w "$SCRATCH/tmp")" \
-    TEMP="$(w "$SCRATCH/tmp")" \
-    PATH="$(w "$UCRT64_BIN");$(w /usr/bin);C:/Windows/System32" \
+    HOME="$SCRATCH/home" \
+    TMPDIR="$SCRATCH/tmp" \
+    TMP="$SCRATCH/tmp" \
+    TEMP="$SCRATCH/tmp" \
+    PATH="$UCRT64_BIN:/usr/bin:/c/Windows/System32" \
     SystemRoot='C:\Windows' \
     SystemDrive='C:' \
     WINDIR='C:\Windows' \
@@ -309,11 +326,11 @@ if [ ! -f "$INSTALL_STAMP" ]; then
   env -i \
     MSYS2_ARG_CONV_EXCL='*' \
     MSYS2_ENV_CONV_EXCL='*' \
-    HOME="$(w "$SCRATCH/home")" \
-    TMPDIR="$(w "$SCRATCH/tmp")" \
-    TMP="$(w "$SCRATCH/tmp")" \
-    TEMP="$(w "$SCRATCH/tmp")" \
-    PATH="$(w "$UCRT64_BIN");$(w /usr/bin);C:/Windows/System32" \
+    HOME="$SCRATCH/home" \
+    TMPDIR="$SCRATCH/tmp" \
+    TMP="$SCRATCH/tmp" \
+    TEMP="$SCRATCH/tmp" \
+    PATH="$UCRT64_BIN:/usr/bin:/c/Windows/System32" \
     SystemRoot='C:\Windows' \
     SystemDrive='C:' \
     WINDIR='C:\Windows' \
@@ -390,11 +407,11 @@ run_probe() {
   env -i \
     MSYS2_ARG_CONV_EXCL='*' \
     MSYS2_ENV_CONV_EXCL='*' \
-    HOME="$(w "$SCRATCH/home")" \
-    TMPDIR="$(w "$SCRATCH/tmp")" \
-    TMP="$(w "$SCRATCH/tmp")" \
-    TEMP="$(w "$SCRATCH/tmp")" \
-    PATH='C:/Windows/System32' \
+    HOME="$SCRATCH/home" \
+    TMPDIR="$SCRATCH/tmp" \
+    TMP="$SCRATCH/tmp" \
+    TEMP="$SCRATCH/tmp" \
+    PATH='/c/Windows/System32' \
     SystemRoot='C:\Windows' \
     SystemDrive='C:' \
     WINDIR='C:\Windows' \
