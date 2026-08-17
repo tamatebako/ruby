@@ -56,5 +56,9 @@ step("popen2e") do
     stdin.close
     while stdouterr.gets; end
     wt.value
-  end.tap { |(_out, st)| raise "child exit #{st.exitstatus}" unless st.success? }
+    # The block's value IS the Process::Status popen2e hands back — tap
+    # takes it whole (destructuring a Status yields nil for st, which is
+    # how the tenth dogfood incident printed a NoMethodError here instead
+    # of the child's verdict).
+  end.tap { |st| raise "child exit #{st.exitstatus}" unless st.success? }
 end
