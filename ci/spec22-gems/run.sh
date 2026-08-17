@@ -100,6 +100,15 @@ mkdir -p "$SCRATCH"/{mirror,tmp,home,tebako-home}
 export TMPDIR="$SCRATCH/tmp"
 
 # --- 1. patched source tree + local mirror -------------------------------
+# Deterministic-roll contract (README § "Reproducible tarballs"): identical
+# content must roll to identical bytes — the tarball sha feeds downstream
+# caches. GNU tar clamps all metadata; bsdtar (local macOS runs) cannot —
+# acceptable here: the local mirror is single-machine scratch consumed in
+# the same run.
+DET_TAR=()
+if tar --version 2>/dev/null | grep -qi gnu; then
+  DET_TAR=(--sort=name --mtime=@0 --owner=0 --group=0 --numeric-owner)
+fi
 if [ ! -f "$SCRATCH/mirror/tfs-ruby-$VERSION-src.tar.gz" ]; then
   step "apply $VERSION + roll local source mirror"
   rm -rf "$SCRATCH/roll"
@@ -108,7 +117,7 @@ if [ ! -f "$SCRATCH/mirror/tfs-ruby-$VERSION-src.tar.gz" ]; then
   [ -f "$SCRATCH/roll/tfs-ruby-$VERSION-src/dln.c" ] || die "apply produced no tree"
   grep -q "tfs_dlopen_route" "$SCRATCH/roll/tfs-ruby-$VERSION-src/dln.c" \
     || die "rolled tree lacks the loader-interpose block (manifest not wired?)"
-  ( cd "$SCRATCH/roll" && tar -czf "$SCRATCH/mirror/tfs-ruby-$VERSION-src.tar.gz" "tfs-ruby-$VERSION-src" )
+  ( cd "$SCRATCH/roll" && tar "${DET_TAR[@]}" -czf "$SCRATCH/mirror/tfs-ruby-$VERSION-src.tar.gz" "tfs-ruby-$VERSION-src" )
   ( cd "$SCRATCH/mirror" && shasum -a 256 "tfs-ruby-$VERSION-src.tar.gz" > SHA256SUMS )
 fi
 
