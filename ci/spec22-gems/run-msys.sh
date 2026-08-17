@@ -47,6 +47,10 @@
 # exported env value: TEBAKO_*, HOME, TMP*, GEM_*), VFS paths
 # (/--spellings inside images) raw, cmd flags raw (/c, /D).
 # msys-to-msys spawns (find/cp/grep/…) are unaffected either way.
+# SUBTLETY: the scrubbed legs run the exe through `env -i`, which strips
+# the exported copy — the conversion decision belongs to the DIRECT
+# spawner (env, not bash), so MSYS2_ARG_CONV_EXCL rides INSIDE every
+# env -i list too (env sets it into its own environ before the exec).
 
 set -euo pipefail
 export MSYS2_ARG_CONV_EXCL='*'
@@ -188,6 +192,7 @@ if [ ! -f "$INSTALL_STAMP" ]; then
     || die "subst A: onto $ENV_HOST_PARENT failed — is A: already taken?"
   set +e
   env -i \
+    MSYS2_ARG_CONV_EXCL='*' \
     HOME="$(w "$SCRATCH/home")" \
     TMPDIR="$(w "$SCRATCH/tmp")" \
     TMP="$(w "$SCRATCH/tmp")" \
@@ -259,6 +264,7 @@ run_probe() {
   local leg="$1" img="${2:-$PAYLOAD_IMG}"
   set +e
   env -i \
+    MSYS2_ARG_CONV_EXCL='*' \
     HOME="$(w "$SCRATCH/home")" \
     TMPDIR="$(w "$SCRATCH/tmp")" \
     TMP="$(w "$SCRATCH/tmp")" \
