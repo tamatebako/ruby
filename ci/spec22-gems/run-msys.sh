@@ -35,15 +35,21 @@
 #               setup-msys2 location; the gem-install leg's PATH source
 #               for gcc/make, exactly what the factory builds with)
 #
-# Path discipline: the runtime exe and tfs.exe are NATIVE windows
-# binaries. msys bash converts argv path arguments when spawning them,
-# but ENV VALUES cross unconverted — every host path exported to the
-# runtime (TEBAKO_*, HOME, TMPDIR, GEM_*) goes through cygpath -m
-# (the w() helper), exactly like the ucrt64 BINDGEN lesson in the
-# product's windows-gnu-cli.sh. VFS paths (/--spellings inside images)
-# are NEVER converted.
+# Path discipline: the runtime exe, tfs.exe, and cmd.exe are NATIVE
+# windows binaries, and msys bash's AUTOMATIC argv conversion is the
+# trap: it rewrites leading-slash arguments into install-rooted host
+# paths (`/setup/gem.rb` → `D:/a/_temp/msys64/setup/gem.rb` — the first
+# dogfood run's exit-1), which silently corrupts VFS paths and
+# cmd-style flags. So this script disables it outright
+# (MSYS2_ARG_CONV_EXCL='*'): NOTHING is auto-converted, and every
+# argument to a native binary is spelled in final form BY HAND —
+# host paths through cygpath -m (the w() helper, same as every
+# exported env value: TEBAKO_*, HOME, TMP*, GEM_*), VFS paths
+# (/--spellings inside images) raw, cmd flags raw (/c, /D).
+# msys-to-msys spawns (find/cp/grep/…) are unaffected either way.
 
 set -euo pipefail
+export MSYS2_ARG_CONV_EXCL='*'
 
 VERSION="${1:-4.0.6}"
 SELF_DIR="$(cd "$(dirname "$0")" && pwd)"
@@ -105,7 +111,7 @@ RUNTIME_IMAGE="$RUNTIME_DIR/tebako-runtime.tfs"
 
 # The gem-kill acceptance, windows row: the env image must carry NO
 # tebako-runtime gemspec (post-M2 the factory installs none).
-img_gems="$("$TFS_CLI" find "$RUNTIME_IMAGE" 'tebako-runtime-*.gemspec' | grep '^/lib/ruby/gems/' | sort -u || true)"
+img_gems="$("$TFS_CLI" find "$(w "$RUNTIME_IMAGE")" 'tebako-runtime-*.gemspec' | grep '^/lib/ruby/gems/' | sort -u || true)"
 [ -z "$img_gems" ] \
   || die "env image carries a tebako-runtime gemspec — the gem kill regressed: $(echo "$img_gems" | tr '\n' ' ')"
 
@@ -139,7 +145,7 @@ if [ ! -f "$ENV_HOST/.bridge-$VERSION" ]; then
   step "reconstitute the mount-root bridge tree (tfs extract + devkit)"
   rm -rf "$ENV_HOST"
   mkdir -p "$ENV_HOST/bin" "$ENV_HOST/lib"
-  "$TFS_CLI" extract -q -d "$ENV_HOST" "$RUNTIME_IMAGE"
+  "$TFS_CLI" extract -q -d "$(w "$ENV_HOST")" "$(w "$RUNTIME_IMAGE")"
   [ -d "$DEVKIT_DIR/include" ] || die "devkit include/ missing under $DEVKIT_DIR"
   imp="$(find "$DEVKIT_DIR/lib" -name 'libx64-ucrt-ruby*.dll.a' | head -1)"
   [ -n "$imp" ] || die "devkit import library missing under $DEVKIT_DIR/lib"
@@ -160,7 +166,7 @@ if [ ! -f "$SETUP_IMG" ] || [ "$SELF_DIR/fixtures/gem.rb" -nt "$SETUP_IMG" ]; th
   rm -rf "$SCRATCH/setup-tree"
   mkdir -p "$SCRATCH/setup-tree/setup"
   cp "$SELF_DIR/fixtures/gem.rb" "$SCRATCH/setup-tree/setup/"
-  "$TFS_CLI" mkimage --format dwarfs "$SCRATCH/setup-tree" --output "$SETUP_IMG" >/dev/null
+  "$TFS_CLI" mkimage --format dwarfs "$(w "$SCRATCH/setup-tree")" --output "$(w "$SETUP_IMG")" >/dev/null
 fi
 
 # --- 4. probe gems installed by the runtime's OWN gem tooling -------------
@@ -178,7 +184,7 @@ if [ ! -f "$INSTALL_STAMP" ]; then
   # The bridge goes host-real at the baked root for THIS leg only (the
   # section-2 comment): A:\t == the bridge. Scoped — created here,
   # deleted right after the run; the proof legs never see the alias.
-  cmd //c subst A: "$(cygpath -w "$ENV_HOST_PARENT")" >/dev/null \
+  cmd /c subst A: "$(cygpath -w "$ENV_HOST_PARENT")" >/dev/null \
     || die "subst A: onto $ENV_HOST_PARENT failed — is A: already taken?"
   set +e
   env -i \
@@ -198,7 +204,7 @@ if [ ! -f "$INSTALL_STAMP" ]; then
       > "$SCRATCH/install.log" 2>&1
   gem_status=$?
   set -e
-  cmd //c subst A: //D >/dev/null 2>&1 || true
+  cmd /c subst A: /D >/dev/null 2>&1 || true
   cat "$SCRATCH/install.log"
   [ "$gem_status" -eq 0 ] || die "gem install leg (see $SCRATCH/install.log)"
   grep -q "Successfully installed sinatra-$SINATRA_VERSION" "$SCRATCH/install.log" \
@@ -228,13 +234,13 @@ if [ ! -f "$PAYLOAD_IMG" ] || [ ! -f "$PAYLOAD_IMG_NOMAT" ] \
   cp -R "$GEMHOME" "$PROBE_TREE/probe/gemhome"
   cp "$SELF_DIR/fixtures/payload-manifest.yaml" "$PROBE_TREE/__tpkg__/manifest.yaml"
   rm -f "$PAYLOAD_IMG"
-  "$TFS_CLI" mkimage --format dwarfs "$PROBE_TREE" --output "$PAYLOAD_IMG" >/dev/null
+  "$TFS_CLI" mkimage --format dwarfs "$(w "$PROBE_TREE")" --output "$(w "$PAYLOAD_IMG")" >/dev/null
   cp "$SELF_DIR/fixtures/payload-manifest-unmaterialized.yaml" "$PROBE_TREE/__tpkg__/manifest.yaml"
   rm -f "$PAYLOAD_IMG_NOMAT"
-  "$TFS_CLI" mkimage --format dwarfs "$PROBE_TREE" --output "$PAYLOAD_IMG_NOMAT" >/dev/null
-  "$TFS_CLI" cat "$PAYLOAD_IMG" /__tpkg__/manifest.yaml | grep -q "^materialize:" \
+  "$TFS_CLI" mkimage --format dwarfs "$(w "$PROBE_TREE")" --output "$(w "$PAYLOAD_IMG_NOMAT")" >/dev/null
+  "$TFS_CLI" cat "$(w "$PAYLOAD_IMG")" /__tpkg__/manifest.yaml | grep -q "^materialize:" \
     || die "the pressed image lost the materialize: key (spec 22 §4)"
-  "$TFS_CLI" cat "$PAYLOAD_IMG_NOMAT" /__tpkg__/manifest.yaml | grep -q "^materialize:" \
+  "$TFS_CLI" cat "$(w "$PAYLOAD_IMG_NOMAT")" /__tpkg__/manifest.yaml | grep -q "^materialize:" \
     && die "the negative-oracle image carries materialize: — the oracle would prove nothing"
 fi
 
