@@ -221,7 +221,13 @@ The windows-specific mechanics the leg owns:
   like HOME. A diagnostic leg (`fixtures/envprobe.rb`, always catted)
   prints `Etc.sysconfdir` under the bare / baseline / minimal scrubs on
   every run — the bare probe is the regression record; per-shape logs in
-  `<scratch>/envprobe-<shape>.log`.
+  `<scratch>/envprobe-<shape>.log`. A second diagnostic
+  (`fixtures/pipeprobe.rb`, section 4, always catted, never gating)
+  exercises the extconf respawn's spawn mechanics step-by-step with full
+  backtraces — IO.pipe, spawn with env/chdir/redirects, Open3.popen2e —
+  because rubygems' ext builder compresses a respawn failure to
+  `extconf failed` + open3's ensure-masked `nil.close`; the PROBE-PIPE
+  lines name the failing primitive (`<scratch>/pipeprobe.log`).
 
 Verdict: `SPEC22-GEMS-MSYS-ACCEPTANCE-OK <version>`; per-leg proof output
 in `<scratch>/proof-<leg>.log`, the install transcript in

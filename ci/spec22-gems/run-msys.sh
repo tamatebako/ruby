@@ -184,12 +184,14 @@ fi
 # not proof).
 SETUP_IMG="$SCRATCH/setup.tfs"
 if [ ! -f "$SETUP_IMG" ] || [ "$SELF_DIR/fixtures/gem.rb" -nt "$SETUP_IMG" ] \
-   || [ "$SELF_DIR/fixtures/envprobe.rb" -nt "$SETUP_IMG" ]; then
+   || [ "$SELF_DIR/fixtures/envprobe.rb" -nt "$SETUP_IMG" ] \
+   || [ "$SELF_DIR/fixtures/pipeprobe.rb" -nt "$SETUP_IMG" ]; then
   step "press setup image (GemRunner shim)"
   rm -rf "$SCRATCH/setup-tree"
   mkdir -p "$SCRATCH/setup-tree/setup"
   cp "$SELF_DIR/fixtures/gem.rb" "$SCRATCH/setup-tree/setup/"
   cp "$SELF_DIR/fixtures/envprobe.rb" "$SCRATCH/setup-tree/setup/"
+  cp "$SELF_DIR/fixtures/pipeprobe.rb" "$SCRATCH/setup-tree/setup/"
   "$TFS_CLI" mkimage --format dwarfs "$(w "$SCRATCH/setup-tree")" --output "$(w "$SETUP_IMG")" >/dev/null
 fi
 
@@ -257,6 +259,39 @@ if [ ! -f "$INSTALL_STAMP" ]; then
   # deleted right after the run; the proof legs never see the alias.
   cmd /c subst A: "$(cygpath -w "$ENV_HOST_PARENT")" >/dev/null \
     || die "subst A: onto $ENV_HOST_PARENT failed — is A: already taken?"
+  # Diagnostic: the extconf respawn's spawn mechanics, isolated with FULL
+  # backtraces before the install attempt (the seventh dogfood incident:
+  # rubygems' ext builder printed "extconf failedundefined method 'close'
+  # for nil" — open3's popen2e ensure masks the original exception when a
+  # pipe step raises, so the real error never reached the log). Runs the
+  # SAME env -i list as the install leg with the bridge host-real; always
+  # catted, never gates — the PROBE-PIPE lines plus the install transcript
+  # pinpoint the failing primitive.
+  set +e
+  env -i \
+    MSYS2_ARG_CONV_EXCL='*' \
+    HOME="$(w "$SCRATCH/home")" \
+    TMPDIR="$(w "$SCRATCH/tmp")" \
+    TMP="$(w "$SCRATCH/tmp")" \
+    TEMP="$(w "$SCRATCH/tmp")" \
+    PATH="$(w "$UCRT64_BIN");$(w /usr/bin);C:/Windows/System32" \
+    SystemRoot='C:\Windows' \
+    SystemDrive='C:' \
+    WINDIR='C:\Windows' \
+    ProgramData='C:\ProgramData' \
+    ALLUSERSPROFILE='C:\ProgramData' \
+    USERPROFILE="$(w "$SCRATCH/home")" \
+    APPDATA="$(w "$SCRATCH/home")/AppData/Roaming" \
+    COMSPEC='C:\Windows\System32\cmd.exe' \
+    TEBAKO_HOME="$(w "$SCRATCH/tebako-home")" \
+    TEBAKO_RUNTIME_IMAGE="$(w "$RUNTIME_IMAGE")" \
+    "$RUNTIME_EXE" --tebako-image "$(w "$SETUP_IMG"):-:/" --tebako-entry /setup/pipeprobe.rb \
+    > "$SCRATCH/pipeprobe.log" 2>&1
+  probe_status=$?
+  set -e
+  cat "$SCRATCH/pipeprobe.log"
+  [ "$probe_status" -eq 0 ] \
+    || echo "== spec22-gems-msys note: pipeprobe exit $probe_status (diagnostic only)"
   set +e
   env -i \
     MSYS2_ARG_CONV_EXCL='*' \
@@ -307,7 +342,8 @@ if [ ! -f "$PAYLOAD_IMG" ] || [ ! -f "$PAYLOAD_IMG_NOMAT" ] \
   mkdir -p "$PROBE_TREE/probe" "$PROBE_TREE/__tpkg__"
   cp -R "$SELF_DIR/fixtures/." "$PROBE_TREE/probe/"
   rm -rf "$PROBE_TREE/probe/gem.rb"
-  rm -f "$PROBE_TREE/probe/envprobe.rb"
+  rm -f "$PROBE_TREE/probe/envprobe.rb" \
+        "$PROBE_TREE/probe/pipeprobe.rb"
   rm -f "$PROBE_TREE/probe/payload-manifest.yaml" \
         "$PROBE_TREE/probe/payload-manifest-unmaterialized.yaml"
   cp -R "$GEMHOME" "$PROBE_TREE/probe/gemhome"
