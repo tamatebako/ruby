@@ -207,6 +207,21 @@ The windows-specific mechanics the leg owns:
   matches host prefixes). The platform floor (spec 08 §2.1: System32,
   SysWOW64, Fonts) is implicit under `deny`. The proof legs run WITHOUT
   the toolchain on PATH — a payload needs no compiler at run time.
+- **The windows env baseline.** `env -i` proves the runtime needs nothing
+  from the host environment, but on windows a custom env block below the
+  platform baseline breaks system apis the runtime legitimately calls:
+  with no SystemDrive/WINDIR/ProgramData in the block,
+  `SHGetSpecialFolderLocation` fails (the registry-held shell-folder
+  spellings expand against the process env), so `Etc.sysconfdir` returns
+  nil and rubygems' `config_file.rb` dies at class-load — a real user's
+  env always carries the baseline, so this is not a hermeticity failure.
+  Every `env -i` list pins the baseline: SystemDrive/WINDIR/ProgramData/
+  ALLUSERSPROFILE as the stock `C:\` constants (inert strings — the jail
+  still decides file access), USERPROFILE/APPDATA scoped into the scratch
+  like HOME. A diagnostic leg (`fixtures/envprobe.rb`, always catted)
+  prints `Etc.sysconfdir` under the bare / baseline / minimal scrubs on
+  every run — the bare probe is the regression record; per-shape logs in
+  `<scratch>/envprobe-<shape>.log`.
 
 Verdict: `SPEC22-GEMS-MSYS-ACCEPTANCE-OK <version>`; per-leg proof output
 in `<scratch>/proof-<leg>.log`, the install transcript in

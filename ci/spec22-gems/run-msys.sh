@@ -51,6 +51,24 @@
 # the exported copy — the conversion decision belongs to the DIRECT
 # spawner (env, not bash), so MSYS2_ARG_CONV_EXCL rides INSIDE every
 # env -i list too (env sets it into its own environ before the exec).
+#
+# Env discipline: `env -i` proves the runtime needs nothing from the host
+# ENVIRONMENT — but on windows there is a floor. A custom env block below
+# the platform baseline breaks SYSTEM apis the runtime legitimately
+# calls: with no SystemDrive/WINDIR/ProgramData in the block,
+# SHGetSpecialFolderLocation(CSIDL_COMMON_APPDATA) fails (the
+# registry-held shell-folder spellings are expanded against the process
+# env — below the baseline there is nothing to expand with),
+# Etc.sysconfdir returns
+# nil, and rubygems' config_file.rb dies at CLASS-LOAD (`File.join nil` —
+# the sixth dogfood run's exit-1). A real user's env always carries the
+# baseline, so a runtime that works there but not under a bare env -i is
+# not a hermeticity failure — the bare block is simply not a survivable
+# windows process. Both env -i lists therefore pin the baseline:
+# SystemDrive/WINDIR/ProgramData/ALLUSERSPROFILE as the stock C:\
+# constants (inert STRINGS — the jail still decides file access) and
+# USERPROFILE/APPDATA scoped into the scratch like HOME. Section 3.5's
+# envprobe diagnostic documents the mechanism in every run's log.
 
 set -euo pipefail
 export MSYS2_ARG_CONV_EXCL='*'
@@ -165,13 +183,62 @@ fi
 # so the stock bin/gem body rides a tiny setup image (un-jailed: press,
 # not proof).
 SETUP_IMG="$SCRATCH/setup.tfs"
-if [ ! -f "$SETUP_IMG" ] || [ "$SELF_DIR/fixtures/gem.rb" -nt "$SETUP_IMG" ]; then
+if [ ! -f "$SETUP_IMG" ] || [ "$SELF_DIR/fixtures/gem.rb" -nt "$SETUP_IMG" ] \
+   || [ "$SELF_DIR/fixtures/envprobe.rb" -nt "$SETUP_IMG" ]; then
   step "press setup image (GemRunner shim)"
   rm -rf "$SCRATCH/setup-tree"
   mkdir -p "$SCRATCH/setup-tree/setup"
   cp "$SELF_DIR/fixtures/gem.rb" "$SCRATCH/setup-tree/setup/"
+  cp "$SELF_DIR/fixtures/envprobe.rb" "$SCRATCH/setup-tree/setup/"
   "$TFS_CLI" mkimage --format dwarfs "$(w "$SCRATCH/setup-tree")" --output "$(w "$SETUP_IMG")" >/dev/null
 fi
+
+# --- 3.5 env diagnostic: Etc.sysconfdir under scrubbed envs -------------
+# Pins the env-discipline mechanism (header comment) with evidence in
+# every run's log. env_probe runs the staged exe exactly as the legs do
+# (driver + TEBAKO_RUNTIME_IMAGE + setup image entry; VFS-only fixture,
+# so no subst bridge) under three scrubs: BARE = the pre-fix shape (the
+# regression record — expected etc-sysconfdir=nil), BASELINE = the fix
+# (must be non-nil or the install leg below dies the same way — fail
+# HERE with the evidence in the log), MINIMAL = baseline minus the
+# profile vars (isolates the REG_EXPAND_SZ expansion candidates
+# SystemDrive/WINDIR/ProgramData from USERPROFILE/APPDATA).
+env_probe() {
+  local name="$1"; shift
+  set +e
+  env -i \
+    MSYS2_ARG_CONV_EXCL='*' \
+    HOME="$(w "$SCRATCH/home")" \
+    TMPDIR="$(w "$SCRATCH/tmp")" \
+    TMP="$(w "$SCRATCH/tmp")" \
+    TEMP="$(w "$SCRATCH/tmp")" \
+    PATH='C:/Windows/System32' \
+    SystemRoot='C:\Windows' \
+    "$@" \
+    TEBAKO_RUNTIME_IMAGE="$(w "$RUNTIME_IMAGE")" \
+    "$RUNTIME_EXE" --tebako-image "$(w "$SETUP_IMG"):-:/" --tebako-entry /setup/envprobe.rb \
+    > "$SCRATCH/envprobe-$name.log" 2>&1
+  local st=$?
+  set -e
+  cat "$SCRATCH/envprobe-$name.log"
+  return "$st"
+}
+step "env diagnostic: Etc.sysconfdir under bare / baseline / minimal scrubs"
+env_probe bare || true
+env_probe baseline \
+  SystemDrive='C:' \
+  WINDIR='C:\Windows' \
+  ProgramData='C:\ProgramData' \
+  ALLUSERSPROFILE='C:\ProgramData' \
+  USERPROFILE="$(w "$SCRATCH/home")" \
+  APPDATA="$(w "$SCRATCH/home")/AppData/Roaming" \
+  || die "envprobe baseline leg itself failed (see envprobe-baseline.log above)"
+env_probe minimal \
+  SystemDrive='C:' \
+  WINDIR='C:\Windows' \
+  || true
+grep -qE '^PROBE-ENV etc-sysconfdir="' "$SCRATCH/envprobe-baseline.log" \
+  || die "Etc.sysconfdir is nil even WITH the windows baseline env — the env-baseline theory is falsified; see envprobe-baseline.log above"
 
 # --- 4. probe gems installed by the runtime's OWN gem tooling -------------
 # sassc's native extension is compiled by the runtime's own mkmf through
@@ -199,6 +266,12 @@ if [ ! -f "$INSTALL_STAMP" ]; then
     TEMP="$(w "$SCRATCH/tmp")" \
     PATH="$(w "$UCRT64_BIN");$(w /usr/bin);C:/Windows/System32" \
     SystemRoot='C:\Windows' \
+    SystemDrive='C:' \
+    WINDIR='C:\Windows' \
+    ProgramData='C:\ProgramData' \
+    ALLUSERSPROFILE='C:\ProgramData' \
+    USERPROFILE="$(w "$SCRATCH/home")" \
+    APPDATA="$(w "$SCRATCH/home")/AppData/Roaming" \
     COMSPEC='C:\Windows\System32\cmd.exe' \
     TEBAKO_HOME="$(w "$SCRATCH/tebako-home")" \
     TEBAKO_RUNTIME_IMAGE="$(w "$RUNTIME_IMAGE")" \
@@ -234,6 +307,7 @@ if [ ! -f "$PAYLOAD_IMG" ] || [ ! -f "$PAYLOAD_IMG_NOMAT" ] \
   mkdir -p "$PROBE_TREE/probe" "$PROBE_TREE/__tpkg__"
   cp -R "$SELF_DIR/fixtures/." "$PROBE_TREE/probe/"
   rm -rf "$PROBE_TREE/probe/gem.rb"
+  rm -f "$PROBE_TREE/probe/envprobe.rb"
   rm -f "$PROBE_TREE/probe/payload-manifest.yaml" \
         "$PROBE_TREE/probe/payload-manifest-unmaterialized.yaml"
   cp -R "$GEMHOME" "$PROBE_TREE/probe/gemhome"
@@ -271,6 +345,12 @@ run_probe() {
     TEMP="$(w "$SCRATCH/tmp")" \
     PATH='C:/Windows/System32' \
     SystemRoot='C:\Windows' \
+    SystemDrive='C:' \
+    WINDIR='C:\Windows' \
+    ProgramData='C:\ProgramData' \
+    ALLUSERSPROFILE='C:\ProgramData' \
+    USERPROFILE="$(w "$SCRATCH/home")" \
+    APPDATA="$(w "$SCRATCH/home")/AppData/Roaming" \
     TEBAKO_HOME="$(w "$SCRATCH/tebako-home")" \
     TEBAKO_RUNTIME_IMAGE="$(w "$RUNTIME_IMAGE")" \
     TEBAKO_JAIL="deny;$(w "$SCRATCH"):/host-scratch:rw" \
