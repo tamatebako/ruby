@@ -1,8 +1,9 @@
 # frozen_string_literal: true
 
-# probe.rb — spec 22 gem-level acceptance probe (POSIX). Runs as the
-# --tebako-entry script of a jailed tebako runtime with the probe payload
-# (fixtures + the scratch gem home) mounted at "/". Dispatches on ARGV[0]:
+# probe.rb — spec 22 gem-level acceptance probe (POSIX + windows/msys).
+# Runs as the --tebako-entry script of a jailed tebako runtime with the
+# probe payload (fixtures + the scratch gem home) mounted at "/".
+# Dispatches on ARGV[0]:
 #
 #   sinatra-fixed    — classic-style sinatra with the documented
 #                      payload-side contract (`set :app_file, __FILE__`);
@@ -39,8 +40,21 @@
 # removed the gem from the env image and the gem_prelude require patch is
 # retired, so the line is a pure canary (a `yes` fails the harness). Then
 # one PROBE line per leg. The harness (run.sh) pins the exact expectations.
+#
+# PATH DISCIPLINE: every in-image reference is derived from __FILE__
+# (self-locating), NEVER a bare "/probe/..." literal. On POSIX the
+# payload mount answers bare absolute paths; on windows an absolute
+# path needs a drive letter and the VFS is anchored at A:, so
+# "/probe/gemhome" would resolve rooted-relative against the process's
+# current drive and miss the VFS entirely (the twelfth dogfood
+# incident: LoadError on sinatra/sassc in all four jailed legs with the
+# gems present in the image). __FILE__ is the driver-resolved entry
+# path — "/probe/probe.rb" on POSIX, "A:/probe/probe.rb" on windows —
+# so dirname-derived spellings are byte-identical to the old literals
+# on POSIX and correct on windows.
 
-GEM_HOME_IN_IMAGE = "/probe/gemhome"
+PROBE_DIR = File.dirname(__FILE__)
+GEM_HOME_IN_IMAGE = File.join(PROBE_DIR, "gemhome")
 
 gem_loaded = $LOADED_FEATURES.any? { |f| f.end_with?("/tebako-runtime.rb") }
 puts "PROBE gem-loaded #{gem_loaded ? 'yes' : 'no'}"
@@ -97,7 +111,7 @@ when "sinatra-fixed", "sinatra-unfixed"
   fixed = ARGV[0] == "sinatra-fixed"
   require_relative(fixed ? "app" : "app_unfixed")
   app_file, root, status, body = static_fetch
-  want = File.read("/probe/public/static.txt")
+  want = File.read(File.join(PROBE_DIR, "public/static.txt"))
   if fixed
     if status == 200 && body == want
       puts "PROBE sinatra-fixed ok status=200 bytes=#{body.bytesize} app_file=#{app_file}"
@@ -118,7 +132,7 @@ when "sinatra-fixed", "sinatra-unfixed"
 when "sassc"
   require "sassc"
   puts "PROBE sassc-version #{SassC::VERSION}"
-  css = SassC::Engine.new(File.read("/probe/styles/plain.scss")).render
+  css = SassC::Engine.new(File.read(File.join(PROBE_DIR, "styles/plain.scss"))).render
   if css.include?(".spec22-gems") && css.include?("color: #1d2d3c")
     puts "PROBE sassc-main ok rule=.spec22-gems bytes=#{css.bytesize}"
   else
@@ -148,7 +162,7 @@ when "sassc-unmaterialized"
     # The SAME import against the image pressed WITHOUT materialize: —
     # the negative oracle. The importer's fopen() of the VFS path is not
     # host-real, so the pinned class-R failure must reproduce verbatim.
-    css = sassc_partial("/probe/styles")
+    css = sassc_partial(File.join(PROBE_DIR, "styles"))
     puts "PROBE sassc-partial-unmaterialized unexpected-ok bytes=#{css.bytesize}"
     exit 1
   rescue Exception => e # rubocop:disable Lint/RescueException -- the probe must see every failure mode
