@@ -16,7 +16,7 @@ diff --git a/io.c b/io.c
 index 1bfd39d..54d88d9 100644
 --- a/io.c
 +++ b/io.c
-@@ -174,10 +174,159 @@
+@@ -174,10 +174,164 @@
  #define IO_RBUF_CAPA_FOR(fptr) (NEED_READCONV(fptr) ? IO_CBUF_CAPA_MIN : IO_RBUF_CAPA_MIN)
  #define IO_WBUF_CAPA_MIN  8192
  
@@ -142,9 +142,14 @@ index 1bfd39d..54d88d9 100644
 +    if (!tebako_fd_is_embedded(fd)) {
 +        return fcntl(fd, cmd, arg);
 +    }
-+#ifndef F_GETFL
-+#define F_GETFL 3 /* mingw: ruby's win32.h keeps F_GETFL inside #if 0 */
-+#endif
++/* mingw: ruby's win32.h keeps F_GETFL inside #if 0. Use a PRIVATE name —
++   defining F_GETFL itself would leak into every `#if defined(F_GETFL)`
++   feature test for the rest of io.c and flip them from the stock fstat
++   path onto the fcntl path, where mingw-w64's fcntl(F_GETFL) answers
++   EINVAL for non-disk handles: IO.pipe -> IO#initialize rb_sys_fail ->
++   Errno::EINVAL, and rubygems' ext builder dies with "extconf failed" +
++   open3's ensure-masked `nil.close` (msys dogfood incident 7). */
++#define TFS_F_GETFL 3
 +
 +    switch (cmd) {
 +    case F_GETFD:
@@ -152,7 +157,7 @@ index 1bfd39d..54d88d9 100644
 +    case F_SETFD:
 +        cloexec_flags = arg;
 +        return 0;
-+    case F_GETFL:
++    case TFS_F_GETFL:
 +        return O_RDONLY;
 +    case F_SETFL:
 +        return 0;
@@ -177,7 +182,7 @@ index 1bfd39d..54d88d9 100644
  #undef rename
  #define rename(f, t)	rb_w32_urename((f), (t))
  #endif
-@@ -500,7 +644,8 @@
+@@ -500,7 +650,8 @@
  
  #if defined(_WIN32)
  #define WAIT_FD_IN_WIN32(fptr) \
