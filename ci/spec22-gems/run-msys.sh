@@ -51,6 +51,16 @@
 # the exported copy — the conversion decision belongs to the DIRECT
 # spawner (env, not bash), so MSYS2_ARG_CONV_EXCL rides INSIDE every
 # env -i list too (env sets it into its own environ before the exec).
+# And the ARG knob has a SIBLING: MSYS2_ENV_CONV_EXCL governs the msys
+# runtime's ENVIRONMENT-variable path conversion — a separate heuristic
+# that rewrites the VALUES of known path-list variables (PATH, HOME,
+# TMP, …) when an msys process spawns a native one. It split the
+# pre-converted windows PATH on ':' as bogus POSIX list separators
+# (`D:/a/…` → `D;A:\…` via the /x/→X:\ mapping; `C:/Windows/System32` →
+# `C;<install-root>/Windows/System32`) — the eleventh dogfood incident:
+# every entry nonexistent, so mkmf's bare-name `make` spawn went ENOENT
+# with make installed. `*` excludes all variables; the harness's
+# cygpath-m discipline above already spells every value in final form.
 #
 # Env discipline: `env -i` proves the runtime needs nothing from the host
 # ENVIRONMENT — but on windows there is a floor. A custom env block below
@@ -72,6 +82,7 @@
 
 set -euo pipefail
 export MSYS2_ARG_CONV_EXCL='*'
+export MSYS2_ENV_CONV_EXCL='*'
 
 VERSION="${1:-4.0.6}"
 SELF_DIR="$(cd "$(dirname "$0")" && pwd)"
@@ -210,6 +221,7 @@ env_probe() {
   set +e
   env -i \
     MSYS2_ARG_CONV_EXCL='*' \
+    MSYS2_ENV_CONV_EXCL='*' \
     HOME="$(w "$SCRATCH/home")" \
     TMPDIR="$(w "$SCRATCH/tmp")" \
     TMP="$(w "$SCRATCH/tmp")" \
@@ -270,6 +282,7 @@ if [ ! -f "$INSTALL_STAMP" ]; then
   set +e
   env -i \
     MSYS2_ARG_CONV_EXCL='*' \
+    MSYS2_ENV_CONV_EXCL='*' \
     HOME="$(w "$SCRATCH/home")" \
     TMPDIR="$(w "$SCRATCH/tmp")" \
     TMP="$(w "$SCRATCH/tmp")" \
@@ -295,6 +308,7 @@ if [ ! -f "$INSTALL_STAMP" ]; then
   set +e
   env -i \
     MSYS2_ARG_CONV_EXCL='*' \
+    MSYS2_ENV_CONV_EXCL='*' \
     HOME="$(w "$SCRATCH/home")" \
     TMPDIR="$(w "$SCRATCH/tmp")" \
     TMP="$(w "$SCRATCH/tmp")" \
@@ -375,6 +389,7 @@ run_probe() {
   set +e
   env -i \
     MSYS2_ARG_CONV_EXCL='*' \
+    MSYS2_ENV_CONV_EXCL='*' \
     HOME="$(w "$SCRATCH/home")" \
     TMPDIR="$(w "$SCRATCH/tmp")" \
     TMP="$(w "$SCRATCH/tmp")" \
