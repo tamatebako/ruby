@@ -94,3 +94,33 @@ step("host-tools") do
     end
   end
 end
+
+# FD round-trip probes (incident 12 round 3): logger's log_device.rb:256
+# probe — File.new(f.fileno, autoclose: false, path: "") on a VFS-backed
+# fd — died Errno::EBADF in the jailed proof legs. Name the exact failing
+# primitive, UNJAILED here (the probe.rb twin answers jailed): IO#stat is
+# the pure fstat-shim test; IO.new(fd) walks io_initialize (fstat +
+# rb_update_max_fd + isatty); file-new-path is logger's exact line. The
+# embedded bit mirrors the c_api TEBAKO_FD_FLAG (0x40000000).
+step("fd-roundtrip") do
+  fd_file = File.open(__FILE__)
+  fd_num = fd_file.fileno
+  puts "PROBE-FD fd=#{fd_num} embedded-bit=#{fd_num & 0x4000_0000 != 0}"
+  begin
+    puts "PROBE-FD io-stat size=#{fd_file.stat.size}"
+  rescue Exception => e # rubocop:disable Lint/RescueException -- the diagnostic must see every failure mode
+    puts "PROBE-FD io-stat #{e.class}: #{e.message.lines.first.to_s.strip}"
+  end
+  begin
+    IO.new(fd_num, autoclose: false)
+    puts "PROBE-FD io-new ok"
+  rescue Exception => e # rubocop:disable Lint/RescueException -- the diagnostic must see every failure mode
+    puts "PROBE-FD io-new #{e.class}: #{e.message.lines.first.to_s.strip}"
+  end
+  begin
+    File.new(fd_num, autoclose: false, path: "").path
+    puts "PROBE-FD file-new-path ok"
+  rescue Exception => e # rubocop:disable Lint/RescueException -- the diagnostic must see every failure mode
+    puts "PROBE-FD file-new-path #{e.class}: #{e.message.lines.first.to_s.strip}"
+  end
+end
