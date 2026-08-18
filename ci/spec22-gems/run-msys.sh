@@ -470,6 +470,19 @@ fi
 run_probe() {
   local leg="$1" img="${2:-$PAYLOAD_IMG}"
   set +e
+  # TEBAKO_DEBUG_TFS: the closure-walk traces (dlmap2file's answer, the
+  # PE parse verdict, each dep's resolve/materialize verdict) ride
+  # stderr into the per-leg proof log — incident 13's 126 was mute
+  # without them. env -i strips the ambient copy, so it rides inside
+  # the list; overridable for a quiet local run.
+  # WARNING: a comment line INSIDE a backslash continuation terminates
+  # the command at that point (the continuation splices the comment
+  # line in, the comment ends at its own newline) — the trailing lines
+  # then run as a SEPARATE command with the ambient environment. The
+  # round-4 insert below did exactly that: env -i ran with no command
+  # and the runtime booted without TEBAKO_RUNTIME_IMAGE (no env image
+  # mounted, rubygems prelude failed, probe.rb:66 NoMethodError on all
+  # four legs — run 32188296332). Comments stay OUTSIDE the list.
   env -i \
     MSYS2_ARG_CONV_EXCL='*' \
     MSYS2_ENV_CONV_EXCL='*' \
@@ -487,11 +500,6 @@ run_probe() {
     APPDATA="$(w "$SCRATCH/home")/AppData/Roaming" \
     TEBAKO_HOME="$(w "$SCRATCH/tebako-home")" \
     TEBAKO_RUNTIME_IMAGE="$(w "$RUNTIME_IMAGE")" \
-    # TEBAKO_DEBUG_TFS: the closure-walk traces (dlmap2file's answer, the
-    # PE parse verdict, each dep's resolve/materialize verdict) ride
-    # stderr into the per-leg proof log — incident 13's 126 was mute
-    # without them. env -i strips the ambient copy, so it rides inside
-    # the list; overridable for a quiet local run.
     TEBAKO_JAIL="deny;$(w "$SCRATCH"):/host-scratch:rw" \
     TEBAKO_DEBUG_TFS="${TEBAKO_DEBUG_TFS:-1}" \
     "$RUNTIME_EXE" --tebako-image "$(w "$img"):-:/" --tebako-entry /probe/probe.rb "$leg" \
