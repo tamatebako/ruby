@@ -16,7 +16,7 @@ diff --git a/io.c b/io.c
 index 3a704fa..4764405 100644
 --- a/io.c
 +++ b/io.c
-@@ -169,10 +169,164 @@
+@@ -169,10 +169,172 @@
  
  #define IO_MAX_BUFFER_GROWTH 8 * 1024 * 1024 // 8MB
  
@@ -171,6 +171,14 @@ index 3a704fa..4764405 100644
 +#define rb_w32_lseek(...) tfs_lseek(__VA_ARGS__)
 +#define rb_w32_close(...) tfs_close(__VA_ARGS__)
 +#define rb_w32_fstati128(...) tfs_fstati128(__VA_ARGS__)
++/* fstat must name the shim DIRECTLY: the win32.h fstat -> rb_w32_fstati128
++   hop is not reliably in force in this TU (mingw's <sys/stat.h> at the
++   top of io.c lands after ruby's win32.h and re-points fstat at the CRT
++   -- io_initialize's fd-probe fstat then EBADFs on memfs fds: the
++   incident-12 logger File.new(fileno) failure). Mirrors the POSIX io
++   patch and the msys file.c patch, which both override fstat directly. */
++#undef fstat
++#define fstat(fd, st) tfs_fstati128((fd), (st))
 +#define fcntl(...) tfs_fcntl(__VA_ARGS__)
 +/* -- End of tebako patch -- */
 +
@@ -182,7 +190,7 @@ index 3a704fa..4764405 100644
  #undef rename
  #define rename(f, t)	rb_w32_urename((f), (t))
  #endif
-@@ -496,7 +646,8 @@
+@@ -496,7 +654,8 @@
  
  #if defined(_WIN32)
  #define WAIT_FD_IN_WIN32(fptr) \

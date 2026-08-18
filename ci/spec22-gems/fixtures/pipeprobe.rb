@@ -123,4 +123,9 @@ step("fd-roundtrip") do
   rescue Exception => e # rubocop:disable Lint/RescueException -- the diagnostic must see every failure mode
     puts "PROBE-FD file-new-path #{e.class}: #{e.message.lines.first.to_s.strip}"
   end
+  begin
+    puts "PROBE-FD path-size=#{File.size(__FILE__)}"
+  rescue Exception => e # rubocop:disable Lint/RescueException -- the diagnostic must see every failure mode
+    puts "PROBE-FD path-size #{e.class}: #{e.message.lines.first.to_s.strip}"
+  end
 end
