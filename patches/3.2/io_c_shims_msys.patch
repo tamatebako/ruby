@@ -16,7 +16,7 @@ diff --git a/io.c b/io.c
 index 3a704fa..4764405 100644
 --- a/io.c
 +++ b/io.c
-@@ -169,10 +169,172 @@
+@@ -169,10 +169,189 @@
  
  #define IO_MAX_BUFFER_GROWTH 8 * 1024 * 1024 // 8MB
  
@@ -167,6 +167,22 @@ index 3a704fa..4764405 100644
 +    }
 +}
 +
++/* rb_w32_fd_is_text reads the CRT fd table (_osfile) indexed by a real CRT
++   fd; a libtfs token (fd | TEBAKO_FD_FLAG) indexes it far out of bounds and
++   segfaults -- the CRLF set_binary_mode_with_seek_cur path of a
++   length-capped read (File.binread(path, n)) hits it. The memfs fd has no
++   CRT entry: report binary, the truthful mode for image content. (Absorbed
++   from the factory's rb_w32_fd_is_text hot-patch -- the dispatch belongs in
++   this shim block with the other fd dispatches.) */
++static int
++tfs_fd_is_text(int fd)
++{
++    if (tebako_fd_is_embedded(fd)) {
++        return 0;
++    }
++    return rb_w32_fd_is_text(fd);
++}
++
 +#define rb_w32_read(...) tfs_read(__VA_ARGS__)
 +#define rb_w32_lseek(...) tfs_lseek(__VA_ARGS__)
 +#define rb_w32_close(...) tfs_close(__VA_ARGS__)
@@ -179,6 +195,7 @@ index 3a704fa..4764405 100644
 +   patch and the msys file.c patch, which both override fstat directly. */
 +#undef fstat
 +#define fstat(fd, st) tfs_fstati128((fd), (st))
++#define rb_w32_fd_is_text(...) tfs_fd_is_text(__VA_ARGS__)
 +#define fcntl(...) tfs_fcntl(__VA_ARGS__)
 +/* -- End of tebako patch -- */
 +
@@ -190,7 +207,7 @@ index 3a704fa..4764405 100644
  #undef rename
  #define rename(f, t)	rb_w32_urename((f), (t))
  #endif
-@@ -496,7 +654,8 @@
+@@ -496,7 +671,8 @@
  
  #if defined(_WIN32)
  #define WAIT_FD_IN_WIN32(fptr) \
