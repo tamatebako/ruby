@@ -487,7 +487,13 @@ run_probe() {
     APPDATA="$(w "$SCRATCH/home")/AppData/Roaming" \
     TEBAKO_HOME="$(w "$SCRATCH/tebako-home")" \
     TEBAKO_RUNTIME_IMAGE="$(w "$RUNTIME_IMAGE")" \
+    # TEBAKO_DEBUG_TFS: the closure-walk traces (dlmap2file's answer, the
+    # PE parse verdict, each dep's resolve/materialize verdict) ride
+    # stderr into the per-leg proof log — incident 13's 126 was mute
+    # without them. env -i strips the ambient copy, so it rides inside
+    # the list; overridable for a quiet local run.
     TEBAKO_JAIL="deny;$(w "$SCRATCH"):/host-scratch:rw" \
+    TEBAKO_DEBUG_TFS="${TEBAKO_DEBUG_TFS:-1}" \
     "$RUNTIME_EXE" --tebako-image "$(w "$img"):-:/" --tebako-entry /probe/probe.rb "$leg" \
     > "$SCRATCH/proof-$leg.log" 2>&1
   local st=$?
