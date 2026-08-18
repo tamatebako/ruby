@@ -445,6 +445,15 @@ if [ ! -f "$PAYLOAD_IMG" ] || [ ! -f "$PAYLOAD_IMG_NOMAT" ] \
     || die "the payload image lacks the sinatra $SINATRA_VERSION gemspec — the press dropped the gemhome tree"
   "$TFS_CLI" cat "$(w "$PAYLOAD_IMG")" "/probe/gemhome/specifications/sassc-$SASSC_VERSION.gemspec" >/dev/null \
     || die "the payload image lacks the sassc $SASSC_VERSION gemspec — the press dropped the gemhome tree"
+  # Incident 13: every vendored closure DLL must survive the press too —
+  # the ffi leg's 126 is otherwise ambiguous between a press-side drop
+  # and a runtime walk-miss.
+  for f in "$PROBE_TREE/probe/gemhome/gems/sassc-$SASSC_VERSION/lib/sassc/"*.dll; do
+    [ -f "$f" ] || continue
+    rel="/probe/gemhome/gems/sassc-$SASSC_VERSION/lib/sassc/$(basename "$f")"
+    "$TFS_CLI" cat "$(w "$PAYLOAD_IMG")" "$rel" >/dev/null \
+      || die "the payload image lacks $rel — the press dropped a vendored closure DLL"
+  done
 fi
 
 # --- 6. the jailed proofs ---------------------------------------------------
