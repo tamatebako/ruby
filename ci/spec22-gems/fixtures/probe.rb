@@ -88,6 +88,36 @@ end
 puts "PROBE-DIAG spec-dirs=#{Gem::Specification.dirs.join('|')}"
 puts "PROBE-DIAG specs-total=#{Gem::Specification.count} sinatra=#{Gem::Specification.find_all_by_name('sinatra').length} sassc=#{Gem::Specification.find_all_by_name('sassc').length}"
 
+# FD round-trip probes (incident 12 round 3): the JAILED twin of the
+# pipeprobe fd-roundtrip block. logger's log_device.rb:256 probe —
+# File.new(f.fileno, autoclose: false, path: "") on a VFS-backed fd —
+# died Errno::EBADF in these legs. Names whether the failing primitive
+# is fstat-on-memfs-fd (io-stat) or something deeper in io_initialize
+# (io-new), and whether jailing flips the answer vs pipeprobe's
+# unjailed run. Never gates.
+begin
+  fd_file = File.open(__FILE__)
+  fd_num = fd_file.fileno
+  puts "PROBE-FD fd=#{fd_num} embedded-bit=#{fd_num & 0x4000_0000 != 0}"
+  begin
+    puts "PROBE-FD io-stat size=#{fd_file.stat.size}"
+  rescue Exception => e # rubocop:disable Lint/RescueException -- the diagnostic must see every failure mode
+    puts "PROBE-FD io-stat #{e.class}: #{e.message.lines.first.to_s.strip}"
+  end
+  begin
+    IO.new(fd_num, autoclose: false)
+    puts "PROBE-FD io-new ok"
+  rescue Exception => e # rubocop:disable Lint/RescueException -- the diagnostic must see every failure mode
+    puts "PROBE-FD io-new #{e.class}: #{e.message.lines.first.to_s.strip}"
+  end
+  begin
+    File.new(fd_num, autoclose: false, path: "").path
+    puts "PROBE-FD file-new-path ok"
+  rescue Exception => e # rubocop:disable Lint/RescueException -- the diagnostic must see every failure mode
+    puts "PROBE-FD file-new-path #{e.class}: #{e.message.lines.first.to_s.strip}"
+  end
+end
+
 def static_fetch
   require "rack/mock"
   app = Sinatra::Application
