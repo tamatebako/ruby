@@ -59,6 +59,18 @@ GEM_HOME_IN_IMAGE = File.join(PROBE_DIR, "gemhome")
 gem_loaded = $LOADED_FEATURES.any? { |f| f.end_with?("/tebako-runtime.rb") }
 puts "PROBE gem-loaded #{gem_loaded ? 'yes' : 'no'}"
 
+# Boot-environment tripwire (every leg, never gates): the harness hands
+# the runtime its whole contract through the env (TEBAKO_RUNTIME_IMAGE
+# mounts the stdlib env image; TEBAKO_HOME/HOME scope the store and the
+# user dirs). Incident 13 round 5: a comment line inside run_probe's
+# env -i continuation silently split the command, the runtime booted
+# with NONE of these, and the only symptom was the rubygems prelude
+# warning + the line-66 NoMethodError below — a full CI cycle to
+# diagnose. Report presence up front so a lost handoff names itself in
+# the first three lines of the proof log.
+puts "PROBE-DIAG env TEBAKO_RUNTIME_IMAGE=#{ENV['TEBAKO_RUNTIME_IMAGE'] ? 'set' : 'UNSET'} " \
+     "TEBAKO_HOME=#{ENV['TEBAKO_HOME'] ? 'set' : 'UNSET'} HOME=#{ENV['HOME'] ? 'set' : 'UNSET'}"
+
 # Redirect rubygems at the in-image probe gem home BEFORE requiring any
 # probe gem.
 ENV["GEM_HOME"] = GEM_HOME_IN_IMAGE
