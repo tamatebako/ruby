@@ -29,10 +29,18 @@
 #    error text (FormatMessage), never a bare 126. The v1-era bare
 #    "goto failed" is retired.
 # Host paths pass through byte-identical (the upstream conversion and
-# LoadLibraryW are untouched on the passthrough route); ffi and
-# self-loading C extensions are never patched (the per-gem law) -- the
-# declared-alias bare-name surface serves them through the OS's own
-# search (the driver's boot materialization + PATH prepend).
+# LoadLibraryW are untouched on the passthrough route).
+#  - the raw-load surface (incident 13): ffi's ffi_c.so, fiddle, and
+#    self-loading C extensions call LoadLibrary{A,W,ExA,ExW} RAW, and
+#    windows has no process-wide loader preemption, so those calls
+#    bypass the dln route. After every successful extension load the
+#    module's kernel32/KernelBase loader IAT entries are rebound to the
+#    shims below (tfs_iat_rebind_loader): a covered path gets the same
+#    dlmap2file + PE-closure + ALTERED-search load; ENOENT and host
+#    paths fall through byte-identical. Generic (no per-gem code -- the
+#    per-gem law holds) and runtime-internal; the declared-alias
+#    bare-name surface still serves BARE names through the OS's own
+#    search (the driver's boot materialization + PATH prepend).
 # libtfs c_api extension (requested): tebako_fs_dlmap2file -- extract a
 # memfs file to a host path, the modern counterpart of the legacy
 # tebako_dlmap2file.
@@ -43,7 +51,7 @@
 # decision-only).
 # X-Redesign: win32-dln-interpose
 diff --git a/dln.c b/dln.c
-index 44e8c06..36fce95 100644
+index 44e8c06..ce4b12f 100644
 --- a/dln.c
 +++ b/dln.c
 @@ -83,7 +83,67 @@ char *getenv();
@@ -114,7 +122,272 @@ index 44e8c06..36fce95 100644
  static void
  dln_loaderror(const char *format, ...)
  {
-@@ -318,14 +378,72 @@ dln_load(const char *file)
+@@ -297,6 +357,264 @@ dln_incompatible_library_p(void *handle)
+ COMPILER_WARNING_POP
+ #endif
+ 
++/* -- Start of tebako patch -- */
++/* Incident 13 (spec 22 section 2.1, the windows raw-load surface).
++   Windows has no process-wide loader preemption (no ELF exe-definition
++   preemption, no dyld interpose section), so a RAW LoadLibrary{A,W,ExA,
++   ExW} from a dln-loaded extension -- ffi's ffi_c.so (LoadLibraryExA),
++   fiddle (the LoadLibrary macro), a C extension self-loading -- bypasses
++   the dln route entirely and fails a VFS path with the OS loader's
++   honest 126. The interposition point stays the process's own loader
++   call (Rule L2): after every successful extension load (the call site
++   below), the module's import address table entries for the
++   kernel32/KernelBase loader functions are rebound to the shims here,
++   closing the raw-load gap for every dln-loaded module at once --
++   generic (no per-gem code) and runtime-internal (the spec's law). The
++   rebind is a data-only slot swap in modules this process just loaded,
++   before their user code runs -- no code patching, no trampolines.
++
++   Shim semantics, word-for-word the dln route's Rule-L1 discipline: a
++   tebako-covered path materializes through tebako_fs_dlmap2file (the PE
++   import-closure walk rides it -- vendored sibling DLLs land beside the
++   importer in the mirrored cache layout) and loads via the captured
++   LoadLibraryExW with LOAD_WITH_ALTERED_SEARCH_PATH forced unless the
++   caller passed their own LOAD_LIBRARY_SEARCH_* flags; a covered path
++   the mounts do not hold answers ENOENT and falls through to the
++   captured original byte-identical (host by default); a failed
++   materialization answers NULL + SetLastError -- windows has no dlerror
++   string channel below the ruby layer, so the lossy code channel carries
++   it (the tebako journal keeps the full verdict line). */
++
++typedef HMODULE (WINAPI *tfs_ll_a_fn)(LPCSTR);
++typedef HMODULE (WINAPI *tfs_ll_w_fn)(LPCWSTR);
++typedef HMODULE (WINAPI *tfs_ll_ex_a_fn)(LPCSTR, HANDLE, DWORD);
++typedef HMODULE (WINAPI *tfs_ll_ex_w_fn)(LPCWSTR, HANDLE, DWORD);
++
++static tfs_ll_a_fn tfs_orig_LoadLibraryA;
++static tfs_ll_w_fn tfs_orig_LoadLibraryW;
++static tfs_ll_ex_a_fn tfs_orig_LoadLibraryExA;
++static tfs_ll_ex_w_fn tfs_orig_LoadLibraryExW;
++
++/* All LOAD_LIBRARY_SEARCH_* bits (0x100..0x1000). Combining any of them
++   with LOAD_WITH_ALTERED_SEARCH_PATH is ERROR_INVALID_PARAMETER, so the
++   covered load honors a caller's own search-order flags verbatim and
++   only forces ALTERED when the caller named no search order. */
++#define TFS_LL_SEARCH_MASK 0x00001F00u
++
++/* The errno -> last-error map is the lossy windows channel (no dlerror
++   string below the ruby layer): a jail denial reads as access denied, a
++   cache IO failure as an IO error, anything else as an internal error;
++   the tebako journal keeps the full verdict line. */
++static DWORD
++tfs_shim_last_error(int err)
++{
++    switch (err) {
++      case EACCES: case EPERM: case EROFS: return ERROR_ACCESS_DENIED;
++      case ENOMEM: return ERROR_NOT_ENOUGH_MEMORY;
++      case EIO:    return ERROR_IO_DEVICE;
++      default:     return ERROR_INTERNAL_ERROR;
++    }
++}
++
++static char *
++tfs_wstr_to_utf8(LPCWSTR w)
++{
++    char *s;
++    int n;
++    if (w == NULL) return NULL;
++    n = WideCharToMultiByte(CP_UTF8, 0, w, -1, NULL, 0, NULL, NULL);
++    if (n <= 0) return NULL;
++    s = (char *)malloc((size_t)n);
++    if (s == NULL) return NULL;
++    if (WideCharToMultiByte(CP_UTF8, 0, w, -1, s, n, NULL, NULL) <= 0) {
++        free(s);
++        return NULL;
++    }
++    return s;
++}
++
++/* The covered-path load. Answers 0 when the path is not tebako-covered
++   (the caller falls through to the captured original, byte-identical);
++   answers 1 with *out set otherwise: the materialized module, or NULL +
++   SetLastError on a real materialization failure (never a host shadow).
++   `path` is UTF-8 -- the dln route's CP_UTF8 convention; ffi hands the
++   ruby string's bytes through unmodified, and ruby's filesystem encoding
++   on windows is UTF-8 (an ACP-encoded non-ASCII path simply misses the
++   mount table and passes through, the stock behavior). */
++static int
++tfs_shim_try_covered(const char *path, DWORD flags, HMODULE *out)
++{
++    char *f;
++    WCHAR *wf;
++    int derr;
++
++    if (path == NULL || !tebako_path_is_embedded(path)) return 0;
++    f = tebako_fs_dlmap2file(path);
++    if (f == NULL) {
++        derr = errno;
++        if (derr == ENOENT) return 0;  /* covered but not held: host passthrough */
++        SetLastError(tfs_shim_last_error(derr));
++        *out = NULL;
++        return 1;
++    }
++    if (tfs_orig_LoadLibraryExW == NULL) {
++        /* The internal load function, resolved straight from kernel32 --
++           never through a patched IAT (the ruby DLL's own imports are
++           never rebound), so there is no recursion path. */
++        tfs_orig_LoadLibraryExW = (tfs_ll_ex_w_fn)(void *)GetProcAddress(
++            GetModuleHandleW(L"kernel32.dll"), "LoadLibraryExW");
++        if (tfs_orig_LoadLibraryExW == NULL) {
++            SetLastError(ERROR_INTERNAL_ERROR);
++            *out = NULL;
++            return 1;
++        }
++    }
++    if ((flags & (DWORD)TFS_LL_SEARCH_MASK) == 0)
++        flags |= LOAD_WITH_ALTERED_SEARCH_PATH;
++    wf = rb_w32_mbstr_to_wstr(CP_UTF8, f, -1, NULL);
++    free(f);
++    if (wf == NULL) {
++        SetLastError(ERROR_NOT_ENOUGH_MEMORY);
++        *out = NULL;
++        return 1;
++    }
++    *out = tfs_orig_LoadLibraryExW(wf, NULL, flags);
++    free(wf);
++    return 1;  /* a NULL *out keeps the OS's own last-error (an honest
++                  126 for a vendored import the payload forgot, etc.) */
++}
++
++static HMODULE WINAPI
++tfs_shim_LoadLibraryA(LPCSTR name)
++{
++    HMODULE h;
++    if (tfs_orig_LoadLibraryA == NULL) return LoadLibraryA(name);
++    if (tfs_shim_try_covered(name, 0, &h)) return h;
++    return tfs_orig_LoadLibraryA(name);
++}
++
++static HMODULE WINAPI
++tfs_shim_LoadLibraryW(LPCWSTR name)
++{
++    HMODULE h;
++    char *utf8;
++    if (tfs_orig_LoadLibraryW == NULL) return LoadLibraryW(name);
++    utf8 = tfs_wstr_to_utf8(name);
++    if (tfs_shim_try_covered(utf8, 0, &h)) { free(utf8); return h; }
++    free(utf8);
++    return tfs_orig_LoadLibraryW(name);
++}
++
++static HMODULE WINAPI
++tfs_shim_LoadLibraryExA(LPCSTR name, HANDLE hfile, DWORD flags)
++{
++    HMODULE h;
++    if (tfs_orig_LoadLibraryExA == NULL) return LoadLibraryExA(name, hfile, flags);
++    if (tfs_shim_try_covered(name, flags, &h)) return h;
++    return tfs_orig_LoadLibraryExA(name, hfile, flags);
++}
++
++static HMODULE WINAPI
++tfs_shim_LoadLibraryExW(LPCWSTR name, HANDLE hfile, DWORD flags)
++{
++    HMODULE h;
++    char *utf8;
++    if (tfs_orig_LoadLibraryExW == NULL) return LoadLibraryExW(name, hfile, flags);
++    utf8 = tfs_wstr_to_utf8(name);
++    if (tfs_shim_try_covered(utf8, flags, &h)) { free(utf8); return h; }
++    free(utf8);
++    return tfs_orig_LoadLibraryExW(name, hfile, flags);
++}
++
++static void *
++tfs_shim_for(int ni)
++{
++    switch (ni) {
++      case 0:  return (void *)tfs_shim_LoadLibraryA;
++      case 1:  return (void *)tfs_shim_LoadLibraryW;
++      case 2:  return (void *)tfs_shim_LoadLibraryExA;
++      default: return (void *)tfs_shim_LoadLibraryExW;
++    }
++}
++
++static void
++tfs_capture_original(int ni, void *fn)
++{
++    switch (ni) {
++      case 0:
++        if (tfs_orig_LoadLibraryA == NULL) tfs_orig_LoadLibraryA = (tfs_ll_a_fn)fn;
++        break;
++      case 1:
++        if (tfs_orig_LoadLibraryW == NULL) tfs_orig_LoadLibraryW = (tfs_ll_w_fn)fn;
++        break;
++      case 2:
++        if (tfs_orig_LoadLibraryExA == NULL) tfs_orig_LoadLibraryExA = (tfs_ll_ex_a_fn)fn;
++        break;
++      default:
++        if (tfs_orig_LoadLibraryExW == NULL) tfs_orig_LoadLibraryExW = (tfs_ll_ex_w_fn)fn;
++        break;
++    }
++}
++
++/* The rebind. The module just came from the OS loader, so its import
++   directory is loader-validated; the walk keeps only the cheap
++   signature checks. A slot already holding a shim (a repeat dln load of
++   an already-loaded module) is skipped, so an original is never
++   re-captured from ourselves. */
++static void
++tfs_iat_rebind_loader(void *module)
++{
++    static const char *const shim_names[4] = {
++        "LoadLibraryA", "LoadLibraryW", "LoadLibraryExA", "LoadLibraryExW"
++    };
++    unsigned char *base = (unsigned char *)module;
++    IMAGE_DOS_HEADER *dos = (IMAGE_DOS_HEADER *)base;
++    IMAGE_NT_HEADERS *nt;
++    IMAGE_IMPORT_DESCRIPTOR *desc;
++    DWORD iva, di;
++
++    if (base == NULL || dos->e_magic != IMAGE_DOS_SIGNATURE) return;
++    nt = (IMAGE_NT_HEADERS *)(base + (DWORD)dos->e_lfanew);
++    if (nt->Signature != IMAGE_NT_SIGNATURE) return;
++    if (nt->OptionalHeader.Magic != IMAGE_NT_OPTIONAL_HDR64_MAGIC) return;
++    if (nt->OptionalHeader.NumberOfRvaAndSizes <= IMAGE_DIRECTORY_ENTRY_IMPORT) return;
++    iva = nt->OptionalHeader.DataDirectory[IMAGE_DIRECTORY_ENTRY_IMPORT].VirtualAddress;
++    if (iva == 0) return;
++    desc = (IMAGE_IMPORT_DESCRIPTOR *)(base + iva);
++    for (di = 0; desc[di].Name != 0; di++) {
++        const char *modname = (const char *)(base + desc[di].Name);
++        IMAGE_THUNK_DATA *thunk, *lookup;
++        DWORD lookup_rva;
++        if (_stricmp(modname, "kernel32.dll") != 0 &&
++            _stricmp(modname, "kernelbase.dll") != 0) continue;
++        if (desc[di].FirstThunk == 0) continue;
++        lookup_rva = desc[di].OriginalFirstThunk != 0
++                     ? desc[di].OriginalFirstThunk : desc[di].FirstThunk;
++        thunk  = (IMAGE_THUNK_DATA *)(base + desc[di].FirstThunk);
++        lookup = (IMAGE_THUNK_DATA *)(base + lookup_rva);
++        for (; lookup->u1.AddressOfData != 0; lookup++, thunk++) {
++            IMAGE_IMPORT_BY_NAME *ibn;
++            void *repl;
++            DWORD old_prot;
++            int ni;
++            if (IMAGE_SNAP_BY_ORDINAL(lookup->u1.Ordinal)) continue;
++            ibn = (IMAGE_IMPORT_BY_NAME *)(base + (DWORD)lookup->u1.AddressOfData);
++            for (ni = 0; ni < 4; ni++)
++                if (strcmp((const char *)ibn->Name, shim_names[ni]) == 0) break;
++            if (ni == 4) continue;
++            repl = tfs_shim_for(ni);
++            if ((void *)(uintptr_t)thunk->u1.Function == repl) continue;
++            tfs_capture_original(ni, (void *)(uintptr_t)thunk->u1.Function);
++            if (VirtualProtect((LPVOID)&thunk->u1.Function, sizeof(uintptr_t),
++                               PAGE_READWRITE, &old_prot) == 0) continue;
++            thunk->u1.Function = (uintptr_t)repl;
++            VirtualProtect((LPVOID)&thunk->u1.Function, sizeof(uintptr_t),
++                           old_prot, &old_prot);
++        }
++    }
++}
++/* -- End of tebako patch -- */
++
+ void*
+ dln_load(const char *file)
+ {
+@@ -318,14 +636,72 @@ dln_load(const char *file)
      init_funcname(&buf, file);
  
      /* Convert the file path to wide char */
@@ -189,3 +462,19 @@ index 44e8c06..36fce95 100644
  
      if (!handle) {
  	error = dln_strerror();
+@@ -340,6 +716,15 @@ dln_load(const char *file)
+     }
+ #endif
+ 
++/* -- Start of tebako patch -- */
++	/* Incident 13 (spec 22 section 2.1): rebind the just-loaded
++	   module's kernel loader imports so RAW LoadLibrary{A,W,ExA,ExW}
++	   calls from extensions (ffi, fiddle, self-loads) get the Rule-L1
++	   materialize-then-load route -- the full story is at
++	   tfs_iat_rebind_loader above. */
++	tfs_iat_rebind_loader(handle);
++/* -- End of tebako patch -- */
++
+     if ((init_fct = (void(*)(void))GetProcAddress(handle, buf)) == NULL) {
+ 	dln_loaderror("%s - %s\n%s", dln_strerror(), buf, file);
+     }

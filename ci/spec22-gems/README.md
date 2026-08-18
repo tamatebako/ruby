@@ -201,6 +201,19 @@ The windows-specific mechanics the leg owns:
   `tfs extract` of the env image + the devkit's `include/` + the import
   lib under `lib/`, plus `bin/ruby.exe` and the PE-named DLL beside it;
   it lives at `<scratch>/a-drive/t` so the drive letter maps its parent.
+- **The ucrt import-closure vendoring (incident 13).** sassc's
+  `ffi_lib` spells `libsass.so` by FULL path and ffi calls
+  `LoadLibraryExA` on it raw; ruby's msys dln patch rebinds every loaded
+  module's kernel loader imports onto the Rule-L1 materialize-then-load
+  route, whose PE closure walk resolves an imported DLL ONLY in the
+  importing module's own directory (the locked importer-dir rule — never
+  a cross-mount search). `libsass.so`'s ucrt closure
+  (`libstdc++-6.dll` → `libgcc_s_seh-1.dll` / `libwinpthread-1.dll`)
+  lives in `UCRT64_BIN`, not in the gem tree, so the materialized module
+  would 126. After a successful install the leg vendors the transitive
+  closure (`objdump -p`, fixed-point, existence-tested per name — OS DLLs
+  are skipped by rule, no hardcoded list) next to each `libsass.so` copy,
+  so the pressed payload image is self-contained.
 - **The jail spelling.** `TEBAKO_JAIL="deny;<C:/…/scratch>:/host-scratch:rw"`:
   the grammar right-splits, so the drive-colon host path survives; the
   mount side must be `/`-absolute and is informational (enforcement
