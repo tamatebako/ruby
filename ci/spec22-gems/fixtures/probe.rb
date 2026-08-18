@@ -65,6 +65,29 @@ ENV["GEM_HOME"] = GEM_HOME_IN_IMAGE
 ENV["GEM_PATH"] = GEM_HOME_IN_IMAGE
 Gem.clear_paths
 
+# Discovery diagnostics (every leg, never gates): name the exact
+# primitive that misses if gem activation fails — File.directory?,
+# Dir.children, Dir.glob against the in-image gemhome, then what
+# rubygems itself sees. Incident 12 round 2: the self-locating
+# respell (#80) still LoadError'd on windows with the gems in-image,
+# so the failing primitive is inside the discovery chain, not the
+# spelling.
+puts "PROBE-DIAG gemhome=#{GEM_HOME_IN_IMAGE}"
+puts "PROBE-DIAG gemhome-directory=#{File.directory?(GEM_HOME_IN_IMAGE)}"
+begin
+  puts "PROBE-DIAG gemhome-children=#{Dir.children(GEM_HOME_IN_IMAGE).sort.join(',')}"
+rescue Exception => e # rubocop:disable Lint/RescueException -- the diagnostic must see every failure mode
+  puts "PROBE-DIAG gemhome-children-err #{e.class}: #{e.message.lines.first.to_s.strip}"
+end
+begin
+  gemspecs = Dir.glob(File.join(GEM_HOME_IN_IMAGE, "specifications", "*.gemspec"))
+  puts "PROBE-DIAG gemspecs=#{gemspecs.length} first=#{gemspecs.first}"
+rescue Exception => e # rubocop:disable Lint/RescueException -- the diagnostic must see every failure mode
+  puts "PROBE-DIAG gemspecs-err #{e.class}: #{e.message.lines.first.to_s.strip}"
+end
+puts "PROBE-DIAG spec-dirs=#{Gem::Specification.dirs.join('|')}"
+puts "PROBE-DIAG specs-total=#{Gem::Specification.count} sinatra=#{Gem::Specification.find_all_by_name('sinatra').length} sassc=#{Gem::Specification.find_all_by_name('sassc').length}"
+
 def static_fetch
   require "rack/mock"
   app = Sinatra::Application
