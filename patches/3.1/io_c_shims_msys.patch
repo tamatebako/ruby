@@ -16,7 +16,7 @@ diff --git a/io.c b/io.c
 index 1bfd39d..54d88d9 100644
 --- a/io.c
 +++ b/io.c
-@@ -174,10 +174,189 @@
+@@ -174,10 +174,203 @@
  #define IO_RBUF_CAPA_FOR(fptr) (NEED_READCONV(fptr) ? IO_CBUF_CAPA_MIN : IO_RBUF_CAPA_MIN)
  #define IO_WBUF_CAPA_MIN  8192
  
@@ -197,6 +197,20 @@ index 1bfd39d..54d88d9 100644
 +#define fstat(fd, st) tfs_fstati128((fd), (st))
 +#define rb_w32_fd_is_text(...) tfs_fd_is_text(__VA_ARGS__)
 +#define fcntl(...) tfs_fcntl(__VA_ARGS__)
++
++/* LLP64 (mingw) keeps `long` 32-bit, so ruby's RB_INT2FIX does the
++   Fixnum tag shift in 32 bits: a value with bit 30 set -- exactly the
++   tebako fd flag (TEBAKO_FD_FLAG) -- overflows, sign-extends, and Ruby
++   sees a CORRUPTED negative Integer (NUM2INT hands it back as
++   fd | 0x8000_0000). Every fileno round-trip -- logger's load-time
++   File.new(f.fileno, autoclose: false, path: "") probe in log_device.rb,
++   IO.for_fd, spawn fd redirects -- then EBADFs in the c_api fd-table
++   lookup (msys dogfood incident 12). Recompute in the 64-bit
++   SIGNED_VALUE shift: identical for every value stock windows produces,
++   correct for tebako fds. TU-local on purpose -- the header macro is
++   public API. */
++#undef INT2FIX
++#define INT2FIX(i) ((VALUE)(((SIGNED_VALUE)(i) << 1) | FIXNUM_FLAG))
 +/* -- End of tebako patch -- */
 +
  /* define system APIs */
@@ -207,7 +221,7 @@ index 1bfd39d..54d88d9 100644
  #undef rename
  #define rename(f, t)	rb_w32_urename((f), (t))
  #endif
-@@ -500,7 +675,8 @@
+@@ -500,7 +689,8 @@
  
  #if defined(_WIN32)
  #define WAIT_FD_IN_WIN32(fptr) \
