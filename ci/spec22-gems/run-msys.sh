@@ -368,9 +368,21 @@ if [ ! -f "$INSTALL_STAMP" ]; then
   # the payload image is self-contained — existence-tested per name (OS
   # DLLs the toolchain bin dir does not carry are skipped by rule), no
   # hardcoded DLL list.
-  OBJDUMP_BIN="$UCRT64_BIN/objdump"
-  [ -x "$OBJDUMP_BIN" ] || OBJDUMP_BIN="$(command -v objdump)" \
-    || die "objdump not found in $UCRT64_BIN or PATH"
+  # objdump path discipline (incident 13 round 2): the ucrt64 objdump is
+  # a NATIVE exe and MSYS2_ARG_CONV_EXCL='*' disables bash's automatic
+  # argv conversion, so a POSIX spelling reaches it verbatim and it
+  # answers "No such file". Use /usr/bin/objdump (msys-native, reads
+  # POSIX paths itself) whenever present — `command -v` is unusable for
+  # this (an UCRT64 MSYSTEM puts the native one first in PATH); the
+  # native fallback gets cygpath-m'd paths.
+  OBJDUMP_BIN=/usr/bin/objdump
+  if [ -x "$OBJDUMP_BIN" ]; then
+    vendor_path() { printf '%s' "$1"; }
+  else
+    OBJDUMP_BIN="$UCRT64_BIN/objdump"
+    [ -x "$OBJDUMP_BIN" ] || die "objdump not found at /usr/bin or $UCRT64_BIN"
+    vendor_path() { cygpath -m "$1"; }
+  fi
   vendor_closure() {
     local so="$1" dir changed guard pe dll
     [ -f "$so" ] || return 0
@@ -381,7 +393,7 @@ if [ ! -f "$INSTALL_STAMP" ]; then
       [ "$guard" -le 8 ] || die "DLL closure vendoring did not converge under $dir"
       for pe in "$so" "$dir"/*.dll; do
         [ -f "$pe" ] || continue
-        for dll in $("$OBJDUMP_BIN" -p "$pe" | awk '/DLL Name:/ {print $3}'); do
+        for dll in $("$OBJDUMP_BIN" -p "$(vendor_path "$pe")" | awk '/DLL Name:/ {print $3}'); do
           if [ ! -f "$dir/$dll" ] && [ -f "$UCRT64_BIN/$dll" ]; then
             cp "$UCRT64_BIN/$dll" "$dir/"
             echo "== spec22-gems-msys vendored $dll -> $dir (import of $(basename "$pe"))"
