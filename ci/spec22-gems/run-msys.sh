@@ -388,6 +388,13 @@ if [ ! -f "$PAYLOAD_IMG" ] || [ ! -f "$PAYLOAD_IMG_NOMAT" ] \
     || die "the pressed image lost the materialize: key (spec 22 §4)"
   "$TFS_CLI" cat "$(w "$PAYLOAD_IMG_NOMAT")" /__tpkg__/manifest.yaml | grep -q "^materialize:" \
     && die "the negative-oracle image carries materialize: — the oracle would prove nothing"
+  # The gemhome tree must survive the press verbatim — the proof legs
+  # discover gems ONLY from the image (incident 12: distinguish a
+  # press-side drop from a runtime discovery miss before the legs run).
+  "$TFS_CLI" cat "$(w "$PAYLOAD_IMG")" "/probe/gemhome/specifications/sinatra-$SINATRA_VERSION.gemspec" >/dev/null \
+    || die "the payload image lacks the sinatra $SINATRA_VERSION gemspec — the press dropped the gemhome tree"
+  "$TFS_CLI" cat "$(w "$PAYLOAD_IMG")" "/probe/gemhome/specifications/sassc-$SASSC_VERSION.gemspec" >/dev/null \
+    || die "the payload image lacks the sassc $SASSC_VERSION gemspec — the press dropped the gemhome tree"
 fi
 
 # --- 6. the jailed proofs ---------------------------------------------------
