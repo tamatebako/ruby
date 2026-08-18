@@ -213,7 +213,9 @@ The windows-specific mechanics the leg owns:
   would 126. After a successful install the leg vendors the transitive
   closure (`objdump -p`, fixed-point, existence-tested per name — OS DLLs
   are skipped by rule, no hardcoded list) next to each `libsass.so` copy,
-  so the pressed payload image is self-contained.
+  so the pressed payload image is self-contained. The walk prefers the
+  msys-native `objdump` (`MSYS2_ARG_CONV_EXCL='*'` keeps POSIX paths from
+  reaching the native ucrt64 one — the first run's silent no-op).
 - **The jail spelling.** `TEBAKO_JAIL="deny;<C:/…/scratch>:/host-scratch:rw"`:
   the grammar right-splits, so the drive-colon host path survives; the
   mount side must be `/`-absolute and is informational (enforcement
