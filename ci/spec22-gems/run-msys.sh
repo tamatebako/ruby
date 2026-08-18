@@ -355,6 +355,44 @@ if [ ! -f "$INSTALL_STAMP" ]; then
     || die "sinatra $SINATRA_VERSION not in the install log"
   grep -q "Successfully installed sassc-$SASSC_VERSION" "$SCRATCH/install.log" \
     || die "sassc $SASSC_VERSION not in the install log"
+  # Incident 13: sassc's ffi_lib spells libsass.so by FULL path and ffi
+  # calls LoadLibraryExA on it raw — the dln-load IAT rebind (ruby's msys
+  # dln patch) routes that through the Rule-L1 materialize-then-load path,
+  # whose PE closure walk resolves an imported DLL ONLY in the IMPORTING
+  # module's own directory (the locked importer-dir rule — never a
+  # cross-mount search). libsass.so's ucrt import closure
+  # (libstdc++-6.dll → libgcc_s_seh-1.dll / libwinpthread-1.dll) lives in
+  # $UCRT64_BIN on the host, NOT in the gem tree, so the materialized
+  # module's closure would miss and the load would 126. Vendor the
+  # transitive closure next to each libsass.so copy BEFORE the press so
+  # the payload image is self-contained — existence-tested per name (OS
+  # DLLs the toolchain bin dir does not carry are skipped by rule), no
+  # hardcoded DLL list.
+  OBJDUMP_BIN="$UCRT64_BIN/objdump"
+  [ -x "$OBJDUMP_BIN" ] || OBJDUMP_BIN="$(command -v objdump)" \
+    || die "objdump not found in $UCRT64_BIN or PATH"
+  vendor_closure() {
+    local so="$1" dir changed guard pe dll
+    [ -f "$so" ] || return 0
+    dir="$(dirname "$so")"
+    changed=1; guard=0
+    while [ "$changed" -eq 1 ]; do
+      changed=0; guard=$((guard + 1))
+      [ "$guard" -le 8 ] || die "DLL closure vendoring did not converge under $dir"
+      for pe in "$so" "$dir"/*.dll; do
+        [ -f "$pe" ] || continue
+        for dll in $("$OBJDUMP_BIN" -p "$pe" | awk '/DLL Name:/ {print $3}'); do
+          if [ ! -f "$dir/$dll" ] && [ -f "$UCRT64_BIN/$dll" ]; then
+            cp "$UCRT64_BIN/$dll" "$dir/"
+            echo "== spec22-gems-msys vendored $dll -> $dir (import of $(basename "$pe"))"
+            changed=1
+          fi
+        done
+      done
+    done
+  }
+  vendor_closure "$GEMHOME/gems/sassc-$SASSC_VERSION/ext/libsass.so"
+  vendor_closure "$GEMHOME/gems/sassc-$SASSC_VERSION/lib/sassc/libsass.so"
   touch "$INSTALL_STAMP"
 fi
 
