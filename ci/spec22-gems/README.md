@@ -158,7 +158,10 @@ but no state.
 
 `run-msys.sh` is the same acceptance on windows (spec 22 §8's last row:
 the suite green with the gem gone on **every** published platform). Same
-fixtures, same four jailed legs, same pinned PROBE lines — but it builds
+fixtures, the same four jailed proof legs plus a fifth forensic one
+(`sassc-matrix` — the incident-13 diag sheet on a pristine loader: the
+sha256 legs, the ffi solo loads, the spelling × flag raw-loader matrix;
+never gates), same pinned PROBE lines — but it builds
 nothing: the runtime arrives as the factory's CI artifacts and the
 press/extract tooling is the published windows `tfs` CLI. On msys the
 POSIX harness's roll → link-unit → factory-build chain would re-run the

@@ -4,6 +4,11 @@
 # excludes /__tpkg__/; blob_sha256 stays as authored — advisory producer
 # provenance, never a verification input for an embedded manifest).
 #
+# The library_aliases: block (spec 03 §2.5) is also stamped at press time
+# — by run-msys.sh, one entry per vendored closure DLL, a DERIVED set
+# (never hand-listed here; POSIX run.sh stamps nothing — the bare-name
+# rule is a windows contract).
+#
 # The materialize: block is the spec 22 §4 class-R declaration under
 # test: main.scss and the partial it @imports are files libsass's OWN
 # C++ importer must fopen() on a raw HOST path (the interpreter's

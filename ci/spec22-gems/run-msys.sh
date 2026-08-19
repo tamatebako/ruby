@@ -3,8 +3,9 @@
 # The msys port of run.sh (spec 22 §8's last acceptance row: the v2
 # dogfood suite green with the gem gone on EVERY published platform).
 # Runs the same four jailed proof legs against the same fixtures and
-# pins the same PROBE lines (README.md), with the gem-loaded canary
-# pinned `no`.
+# pins the same PROBE lines (README.md) — plus a fifth forensic leg
+# (sassc-matrix: the incident-13 diag sheet on a pristine loader, never
+# gates) — with the gem-loaded canary pinned `no`.
 #
 # Unlike run.sh this script BUILDS NOTHING: the runtime (exe + ruby DLL
 # + env image) arrives as the factory's CI build-leg artifact and the
@@ -428,16 +429,48 @@ if [ ! -f "$PAYLOAD_IMG" ] || [ ! -f "$PAYLOAD_IMG_NOMAT" ] \
   rm -f "$PROBE_TREE/probe/payload-manifest.yaml" \
         "$PROBE_TREE/probe/payload-manifest-unmaterialized.yaml"
   cp -R "$GEMHOME" "$PROBE_TREE/probe/gemhome"
+  # Incident 13 round 8: declare the vendored closure as library_aliases
+  # (spec 03 §2.5) so the driver boot-materializes the vendored DLLs and
+  # PATH-leads their dirs — the spec 22 §2.1 raw-surface answer. ffi's
+  # LoadLibraryExA on libsass.so's IN-IMAGE spelling keeps its own route;
+  # the aliases carry the bare-name IMPORTS the PE closure lists (round 7
+  # proved the bytes present and byte-identical, the siblings
+  # solo-loadable, and the require-time 126 the loader's dep-search
+  # answer). The set is DERIVED (the same *.dll enumeration the vendoring
+  # above produced), never hardcoded; names dedupe within the image (a
+  # duplicate alias name fails the manifest parse by design). Stamped on
+  # BOTH manifests: the aliases are orthogonal to the materialize:
+  # negative oracle (the sassc-unmaterialized leg still requires sassc —
+  # only the partial read is the oracle).
+  stamp_library_aliases() {
+    local manifest="$1" dll name rel stamped=0
+    local declared=" "
+    local gem_dir="$PROBE_TREE/probe/gemhome/gems/sassc-$SASSC_VERSION"
+    for dll in $(find "$gem_dir" -name '*.dll' | sort); do
+      name="$(basename "$dll")"
+      case "$declared" in *" $name "*) continue ;; esac
+      declared="$declared$name "
+      rel="${dll#"$PROBE_TREE"}"
+      if [ "$stamped" -eq 0 ]; then printf 'library_aliases:\n' >> "$manifest"; stamped=1; fi
+      printf '  - name: %s\n    path: %s\n' "$name" "$rel" >> "$manifest"
+    done
+  }
   cp "$SELF_DIR/fixtures/payload-manifest.yaml" "$PROBE_TREE/__tpkg__/manifest.yaml"
+  stamp_library_aliases "$PROBE_TREE/__tpkg__/manifest.yaml"
   rm -f "$PAYLOAD_IMG"
   "$TFS_CLI" mkimage --format dwarfs "$(w "$PROBE_TREE")" --output "$(w "$PAYLOAD_IMG")" >/dev/null
   cp "$SELF_DIR/fixtures/payload-manifest-unmaterialized.yaml" "$PROBE_TREE/__tpkg__/manifest.yaml"
+  stamp_library_aliases "$PROBE_TREE/__tpkg__/manifest.yaml"
   rm -f "$PAYLOAD_IMG_NOMAT"
   "$TFS_CLI" mkimage --format dwarfs "$(w "$PROBE_TREE")" --output "$(w "$PAYLOAD_IMG_NOMAT")" >/dev/null
   "$TFS_CLI" cat "$(w "$PAYLOAD_IMG")" /__tpkg__/manifest.yaml | grep -q "^materialize:" \
     || die "the pressed image lost the materialize: key (spec 22 §4)"
   "$TFS_CLI" cat "$(w "$PAYLOAD_IMG_NOMAT")" /__tpkg__/manifest.yaml | grep -q "^materialize:" \
     && die "the negative-oracle image carries materialize: — the oracle would prove nothing"
+  "$TFS_CLI" cat "$(w "$PAYLOAD_IMG")" /__tpkg__/manifest.yaml | grep -q "^library_aliases:" \
+    || die "the pressed image lost the library_aliases: key (spec 22 §2.1)"
+  "$TFS_CLI" cat "$(w "$PAYLOAD_IMG_NOMAT")" /__tpkg__/manifest.yaml | grep -q "^library_aliases:" \
+    || die "the negative-oracle image lost the library_aliases: key (spec 22 §2.1)"
   # The gemhome tree must survive the press verbatim — the proof legs
   # discover gems ONLY from the image (incident 12: distinguish a
   # press-side drop from a runtime discovery miss before the legs run).
@@ -511,11 +544,15 @@ run_probe() {
 }
 
 step "jailed probe runs (TEBAKO_JAIL=deny;<scratch>:/host-scratch:rw)"
-st_fixed=0; st_unfixed=0; st_sassc=0; st_sassc_nomat=0
+st_fixed=0; st_unfixed=0; st_sassc=0; st_sassc_nomat=0; st_matrix=0
 run_probe sinatra-fixed   || st_fixed=$?
 run_probe sinatra-unfixed || st_unfixed=$?
 run_probe sassc           || st_sassc=$?
 run_probe sassc-unmaterialized "$PAYLOAD_IMG_NOMAT" || st_sassc_nomat=$?
+# The incident-13 forensic sheet on a pristine loader (no require attempt
+# first — the bisect legs run post-LoadError by construction). Its
+# PROBE-DIAG lines carry the verdicts; the leg itself must only complete.
+run_probe sassc-matrix    || st_matrix=$?
 
 gem_loaded="$(grep -m1 -oE '^PROBE gem-loaded (yes|no)' "$SCRATCH/proof-sinatra-fixed.log" | awk '{print $3}')"
 [ -n "$gem_loaded" ] || die "gem-loaded instrumentation line missing"
@@ -523,7 +560,7 @@ gem_loaded="$(grep -m1 -oE '^PROBE gem-loaded (yes|no)' "$SCRATCH/proof-sinatra-
 # means the gem crept back into the env image (or a boot-time require
 # returned) — same pin as POSIX.
 [ "$gem_loaded" = "no" ] || die "gem-loaded must be no post-M2, got $gem_loaded"
-for leg in sinatra-unfixed sassc sassc-unmaterialized; do
+for leg in sinatra-unfixed sassc sassc-unmaterialized sassc-matrix; do
   other="$(grep -m1 -oE '^PROBE gem-loaded (yes|no)' "$SCRATCH/proof-$leg.log" | awk '{print $3}')"
   [ "$other" = "$gem_loaded" ] || die "gem-loaded disagree across legs ($gem_loaded vs $other in $leg)"
 done
@@ -539,5 +576,8 @@ grep -q "^PROBE sinatra-unfixed ok status=200 " "$SCRATCH/proof-sinatra-unfixed.
 [ "$st_sassc_nomat" -eq 0 ] || die "sassc-unmaterialized leg exit $st_sassc_nomat"
 grep -qF "PROBE sassc-partial-unmaterialized expected-fail $SASSC_PARTIAL_PIN" "$SCRATCH/proof-sassc-unmaterialized.log" \
   || die "sassc-partial-unmaterialized leg (expected the pinned class-R failure signature)"
+[ "$st_matrix" -eq 0 ] || die "sassc-matrix leg exit $st_matrix"
+grep -q "^PROBE sassc-matrix done" "$SCRATCH/proof-sassc-matrix.log" \
+  || die "sassc-matrix leg (no done line — the sheet aborted)"
 
 echo "SPEC22-GEMS-MSYS-ACCEPTANCE-OK $VERSION ($RUNTIME_EXE; sinatra $SINATRA_VERSION, sassc $SASSC_VERSION, no tebako-runtime gem)"
