@@ -176,38 +176,142 @@ def sassc_partial(styles)
   ).render
 end
 
-# Incident 13 round 6 diagnostics: ffi's load of the vendored
-# libsass.so fails the OS bind (error 126) with the closure walk
-# provably complete — both vendored siblings parse and materialize
-# beside the importer, and the api-ms-* host surface is proven by the
-# runtime's own boot. The failing link is only measurable on the
-# windows loader itself, so on LoadError bisect the closure from
-# inside through the same ffi path: two host-surface controls by bare
-# name (a stock OS module; an api-ms-win-crt contract), then each
-# vendored sibling individually, then the top module again. The
-# per-module verdicts name the missing piece; a retry success names a
-# host-side transient (a lock race), not the closure. Never gates: the
-# original LoadError re-raises after the verdicts.
+# Incident 13 round 7 diagnostics. Round 6 (the first run carrying the
+# ffi bisect) proved two things and broke one: the closure walk's answers
+# match ground truth byte-for-byte (the pressed payload image, extracted
+# on macOS: all 16 imports of libsass.so match llvm-objdump's read of the
+# real import tables; every vendored sibling is a valid coff-x86-64 PE),
+# and the ffi failure is the OS's own answer (the shim's covered route
+# forwards LOAD_WITH_ALTERED_SEARCH_PATH — dln_c_dlmap_msys.patch forces
+# 0x8 when the caller named no LOAD_LIBRARY_SEARCH_* order). What broke:
+# FFI::DynamicLibrary.load_library went private in ffi 1.17, so the
+# round-6 bisect died NoMethodError on its first leg and no dep-load
+# verdict ever printed.
+#
+# What has never been measured ON THE RUNNER:
+#  (a) the bytes the WINDOWS backend streams out — a windows-only backend
+#      read bug is poison the macOS extraction cannot show, so sha256 each
+#      vendored module through ruby's patched IO and compare against the
+#      image-extracted constants (the vendored DLLs are copied binaries —
+#      byte-stable across runs; libsass.so is compiled per run by gem
+#      install, so its comparison is informational, never a verdict);
+#  (b) each vendored sibling's OWN OS bind — the 126 names "a dep",
+#      never which;
+#  (c) the search-order semantics themselves: a fiddle-driven flag matrix
+#      against the materialized HOST spelling. The host spelling is not a
+#      covered path, so the shim passes it through byte-identical and
+#      fiddle drives the RAW loader; the default-order leg is the negative
+#      control (the standard order never searches the DLL's own dir, so
+#      126 there is documented behavior — a SUCCESS there rewrites the
+#      model).
+# Never gates: the original LoadError re-raises after the verdicts, and
+# no leg may kill the bisect (every leg rescues StandardError).
+
+# sha256 + byte counts of the three vendored modules, extracted from the
+# round-6 run's pressed payload image (probe-gems-4.0.6.tfs) on macOS via
+# the dwarfs-t backend's POSIX read path.
+SASSC_MODULE_WANTS = {
+  "libwinpthread-1.dll" => ["0bf76de7b957fc1f87f8be9c8c46af4588db204b0600a3e7abe7243c790f8dfd", 63_135],
+  "libgcc_s_seh-1.dll" => ["80940372431cc76224dfda06e2d33f01e49af3b4e7c499c535be856ebcadd273", 151_654],
+  "libsass.so" => ["a32057aec31b03576a96d2dd14ace082ac28c6b57955648b052fd1d391dd2039", 7_528_855]
+}.freeze
+
+# The vendored modules' in-image paths, keyed by basename; empty when the
+# sassc spec never activated (the require died before rubygems recorded it).
+def sassc_module_paths
+  spec = Gem.loaded_specs["sassc"]
+  return {} if spec.nil?
+  native_dir = File.join(spec.gem_dir, "lib", "sassc")
+  SASSC_MODULE_WANTS.keys.to_h { |mod| [mod, File.join(native_dir, mod)] }
+end
+
+def sassc_sha256_legs
+  require "digest"
+  sassc_module_paths.each do |label, path|
+    want_hex, want_bytes = SASSC_MODULE_WANTS[label]
+    got_hex = Digest::SHA256.file(path).hexdigest
+    got_bytes = File.size(path)
+    verdict = got_hex == want_hex && got_bytes == want_bytes ? "match" : "differs-from-r6-image"
+    puts "PROBE-DIAG sha256 #{label} #{verdict} hex=#{got_hex} bytes=#{got_bytes}"
+  rescue StandardError => se
+    puts "PROBE-DIAG sha256 #{label} error #{se.class}: #{se.message.lines.first.to_s.strip}"
+  end
+end
+
+# Two host-surface controls by bare name (a stock OS module; an
+# api-ms-win-crt contract), then each vendored sibling individually, then
+# the top module — all through ffi's public DynamicLibrary.open, i.e. the
+# same covered route the failing ffi_lib took. A success stays loaded and
+# would poison later legs, so every success is freed at once.
+def sassc_ffi_load_legs
+  legs = { "ADVAPI32.dll" => "ADVAPI32.dll",
+           "api-ms-win-crt-runtime-l1-1-0.dll" => "api-ms-win-crt-runtime-l1-1-0.dll" }
+  sassc_module_paths.each { |label, path| legs[label] = path }
+  legs.each do |label, spell|
+    lib = FFI::DynamicLibrary.open(spell, FFI::DynamicLibrary::RTLD_LAZY)
+    puts "PROBE-DIAG dep-load #{label} ok"
+    lib.free
+  rescue StandardError => le
+    puts "PROBE-DIAG dep-load #{label} fail #{le.message.lines.first.to_s.strip}"
+  end
+end
+
+# The raw-loader flag matrix against the materialized HOST spelling. The
+# dlmap cache mirrors the memfs tree under TEBAKO_EXEC_CACHE/tebako-dl-*;
+# the host spelling is not a covered path, so the shim passes it through
+# byte-identical and these legs measure the OS loader alone.
+def sassc_fiddle_matrix
+  cache = ENV["TEBAKO_EXEC_CACHE"].to_s
+  if cache.empty?
+    puts "PROBE-DIAG fiddle skipped (TEBAKO_EXEC_CACHE unset)"
+    return
+  end
+  require "fiddle"
+  kernel32 = Fiddle.dlopen("kernel32")
+  load_ex_a = Fiddle::Function.new(kernel32["LoadLibraryExA"],
+                                   [Fiddle::TYPE_VOIDP, Fiddle::TYPE_VOIDP, Fiddle::TYPE_LONG],
+                                   Fiddle::TYPE_VOIDP)
+  free_lib = Fiddle::Function.new(kernel32["FreeLibrary"], [Fiddle::TYPE_VOIDP], Fiddle::TYPE_LONG)
+  last_err = Fiddle::Function.new(kernel32["GetLastError"], [], Fiddle::TYPE_LONG)
+  host_dir = Dir.glob(File.join(cache, "tebako-dl-*", "A_", "probe", "gemhome", "gems",
+                                "sassc-2.4.0", "lib", "sassc")).first
+  if host_dir.nil?
+    puts "PROBE-DIAG fiddle skipped (no tebako-dl cache under #{cache})"
+    return
+  end
+  # libsass's three flag legs first (the search-order question), then the
+  # siblings' solo binds under the ffi-equivalent flag (the which-dep
+  # question). A succeeded load is freed immediately so no leg poisons
+  # the next via the loader's already-loaded table.
+  matrix = [["libsass.so:default-order-NEGCTL", File.join(host_dir, "libsass.so"), 0x0],
+            ["libsass.so:altered", File.join(host_dir, "libsass.so"), 0x8],
+            ["libsass.so:search-default+dll-dir", File.join(host_dir, "libsass.so"), 0x1100]]
+  SASSC_MODULE_WANTS.each_key { |mod| matrix << ["#{mod}:altered", File.join(host_dir, mod), 0x8] }
+  matrix.each do |label, host_path, fl|
+    unless File.exist?(host_path)
+      puts "PROBE-DIAG fiddle-load #{label} missing-on-host #{host_path}"
+      next
+    end
+    h = load_ex_a.call(Fiddle::Pointer[host_path], nil, fl)
+    if h.nil? || h.zero?
+      puts "PROBE-DIAG fiddle-load #{label} fail os-err=#{last_err.call}"
+    else
+      puts "PROBE-DIAG fiddle-load #{label} ok"
+      free_lib.call(h)
+    end
+  rescue StandardError => fe
+    puts "PROBE-DIAG fiddle-load #{label} error #{fe.class}: #{fe.message.lines.first.to_s.strip}"
+  end
+rescue StandardError => fe
+  puts "PROBE-DIAG fiddle aborted #{fe.class}: #{fe.message.lines.first.to_s.strip}"
+end
+
 def require_sassc_with_bisect
   require "sassc"
 rescue LoadError => e
-  bisect = { "ADVAPI32.dll" => "ADVAPI32.dll",
-             "api-ms-win-crt-runtime-l1-1-0.dll" => "api-ms-win-crt-runtime-l1-1-0.dll" }
-  spec = Gem.loaded_specs["sassc"]
-  if spec.nil?
-    puts "PROBE-DIAG dep-load skipped (the sassc spec never activated)"
-  else
-    native_dir = File.join(spec.gem_dir, "lib", "sassc")
-    %w[libwinpthread-1.dll libgcc_s_seh-1.dll libsass.so].each do |mod|
-      bisect[mod] = File.join(native_dir, mod)
-    end
-  end
-  bisect.each do |label, spell|
-    FFI::DynamicLibrary.load_library(spell, FFI::DynamicLibrary::RTLD_LAZY)
-    puts "PROBE-DIAG dep-load #{label} ok"
-  rescue LoadError => le
-    puts "PROBE-DIAG dep-load #{label} fail #{le.message.lines.first.to_s.strip}"
-  end
+  sassc_sha256_legs
+  sassc_ffi_load_legs
+  sassc_fiddle_matrix
   raise e
 end
 
