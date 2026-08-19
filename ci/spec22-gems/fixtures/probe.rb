@@ -155,7 +155,10 @@ end
 # match IS this payload's extraction — anything else (no export, no match,
 # several matches) is a loud probe failure, never a silent fallthrough.
 def materialized_styles_dir
-  cache = ENV["TEBAKO_EXEC_CACHE"].to_s
+  # The driver exports the HOST spelling (backslashes on windows), and
+  # Dir.glob treats backslash as an escape there — glob with the
+  # forward-slash spelling (ruby accepts it everywhere on windows).
+  cache = ENV["TEBAKO_EXEC_CACHE"].to_s.tr('\\', '/')
   if cache.empty?
     puts "PROBE sassc-partial fail TEBAKO_EXEC_CACHE is not exported (the driver predates class R?)"
     exit 1
@@ -302,7 +305,8 @@ def sassc_raw_matrix
     attach_function :last_err, :GetLastError, [], :ulong
   end
   paths = sassc_module_paths
-  cache = ENV["TEBAKO_EXEC_CACHE"].to_s
+  # The glob spelling, see materialized_styles_dir (backslash escapes).
+  cache = ENV["TEBAKO_EXEC_CACHE"].to_s.tr('\\', '/')
   host_dir = cache.empty? ? nil : Dir.glob(File.join(cache, "tebako-dl-*", "A_", "probe", "gemhome", "gems",
                                                      "sassc-*", "lib", "sassc")).first
   legs = []
