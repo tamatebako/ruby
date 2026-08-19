@@ -176,6 +176,41 @@ def sassc_partial(styles)
   ).render
 end
 
+# Incident 13 round 6 diagnostics: ffi's load of the vendored
+# libsass.so fails the OS bind (error 126) with the closure walk
+# provably complete — both vendored siblings parse and materialize
+# beside the importer, and the api-ms-* host surface is proven by the
+# runtime's own boot. The failing link is only measurable on the
+# windows loader itself, so on LoadError bisect the closure from
+# inside through the same ffi path: two host-surface controls by bare
+# name (a stock OS module; an api-ms-win-crt contract), then each
+# vendored sibling individually, then the top module again. The
+# per-module verdicts name the missing piece; a retry success names a
+# host-side transient (a lock race), not the closure. Never gates: the
+# original LoadError re-raises after the verdicts.
+def require_sassc_with_bisect
+  require "sassc"
+rescue LoadError => e
+  bisect = { "ADVAPI32.dll" => "ADVAPI32.dll",
+             "api-ms-win-crt-runtime-l1-1-0.dll" => "api-ms-win-crt-runtime-l1-1-0.dll" }
+  spec = Gem.loaded_specs["sassc"]
+  if spec.nil?
+    puts "PROBE-DIAG dep-load skipped (the sassc spec never activated)"
+  else
+    native_dir = File.join(spec.gem_dir, "lib", "sassc")
+    %w[libwinpthread-1.dll libgcc_s_seh-1.dll libsass.so].each do |mod|
+      bisect[mod] = File.join(native_dir, mod)
+    end
+  end
+  bisect.each do |label, spell|
+    FFI::DynamicLibrary.load_library(spell, FFI::DynamicLibrary::RTLD_LAZY)
+    puts "PROBE-DIAG dep-load #{label} ok"
+  rescue LoadError => le
+    puts "PROBE-DIAG dep-load #{label} fail #{le.message.lines.first.to_s.strip}"
+  end
+  raise e
+end
+
 case ARGV[0]
 when "sinatra-fixed", "sinatra-unfixed"
   fixed = ARGV[0] == "sinatra-fixed"
@@ -200,7 +235,7 @@ when "sinatra-fixed", "sinatra-unfixed"
     exit 1
   end
 when "sassc"
-  require "sassc"
+  require_sassc_with_bisect
   puts "PROBE sassc-version #{SassC::VERSION}"
   css = SassC::Engine.new(File.read(File.join(PROBE_DIR, "styles/plain.scss"))).render
   if css.include?(".spec22-gems") && css.include?("color: #1d2d3c")
@@ -226,7 +261,7 @@ when "sassc"
     exit 1
   end
 when "sassc-unmaterialized"
-  require "sassc"
+  require_sassc_with_bisect
   puts "PROBE sassc-version #{SassC::VERSION}"
   begin
     # The SAME import against the image pressed WITHOUT materialize: —
