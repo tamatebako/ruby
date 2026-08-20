@@ -10,7 +10,11 @@
 # memfs is read-only -- and everything else goes to the host fs), and
 # treat tebako memfs file descriptors as already-readable in rb_io_wait
 # (skip the cancelable wait; tebako_fd_is_embedded is the c_api FD
-# introspection).
+# introspection). Also dispatches rb_w32_fd_is_text through
+# tebako_fd_is_embedded (tfs_fd_is_text): a length-capped memfs read
+# (File.binread(path, n)) reaches it via the CRLF set_binary_mode path,
+# and the CRT fd table cannot be indexed by a libtfs token fd (segfault,
+# tebako-runtime-ruby #114).
 # libtfs c_api extension (requested): tebako_fs_pread -- a positional read
 # that does not move the file position (IO#pread on memfs files).
 # X-Redesign: modern-api
@@ -18,7 +22,7 @@ diff --git a/io.c b/io.c
 index 3d2e340..018bb45 100644
 --- a/io.c
 +++ b/io.c
-@@ -175,10 +175,174 @@
+@@ -175,10 +175,189 @@
  
  #define IO_MAX_BUFFER_GROWTH 8 * 1024 * 1024 // 8MB
  
@@ -178,11 +182,26 @@ index 3d2e340..018bb45 100644
 +    }
 +}
 +
++/* rb_w32_fd_is_text reads the CRT fd table (_osfile) indexed by a real CRT
++   fd; a libtfs token (fd | TEBAKO_FD_FLAG) indexes it far out of bounds
++   and segfaults -- the CRLF set_binary_mode_with_seek_cur path of a
++   length-capped read (File.binread(path, n)) hits it. The memfs fd has
++   no CRT entry: report binary, the truthful mode for image content. */
++static int
++tfs_fd_is_text(int fd)
++{
++    if (tebako_fd_is_embedded(fd)) {
++        return 0;
++    }
++    return rb_w32_fd_is_text(fd);
++}
++
 +#define rb_w32_read(...) tfs_read(__VA_ARGS__)
 +#define rb_w32_pread(...) tfs_pread(__VA_ARGS__)
 +#define rb_w32_lseek(...) tfs_lseek(__VA_ARGS__)
 +#define rb_w32_close(...) tfs_close(__VA_ARGS__)
 +#define rb_w32_fstati128(...) tfs_fstati128(__VA_ARGS__)
++#define rb_w32_fd_is_text(...) tfs_fd_is_text(__VA_ARGS__)
 +#define fcntl(...) tfs_fcntl(__VA_ARGS__)
 +/* -- End of tebako patch -- */
 +
@@ -194,7 +213,7 @@ index 3d2e340..018bb45 100644
  #undef rename
  #define rename(f, t)	rb_w32_urename((f), (t))
  #include "win32/file.h"
-@@ -514,7 +673,8 @@
+@@ -514,7 +688,8 @@
  
  #if defined(_WIN32)
  #define WAIT_FD_IN_WIN32(fptr) \

@@ -13,6 +13,10 @@
 # libtfs c_api extensions (requested): tebako_fs_dir_is_embedded,
 # tebako_fs_rewinddir, tebako_fs_telldir, tebako_fs_seekdir -- the dir-handle
 # counterparts of the fd introspection/positioning used for the dispatch.
+# Also guards the _WIN32 glob_opendir() capacity hint: it reads the win32
+# DIR emulation's dirp->nfiles directly, but a memfs dir handle is a libtfs
+# registry token, not a win32 DIR -- the unguarded read segfaults rubygems'
+# boot-time glob-scan of the memfs (tebako-runtime-ruby #114 windows legs).
 # X-Redesign: modern-api
 diff --git a/dir.c b/dir.c
 index 25ed59c..53dce10 100644
@@ -202,6 +206,16 @@ index 25ed59c..53dce10 100644
              u_int32_t attrbuf[1];
              struct attrlist al = {ATTR_BIT_MAP_COUNT, 0};
              struct getattrlist_args args = GETATTRLIST_ARGS(&al, attrbuf, FSOPT_NOFOLLOW);
+@@ -2643,8 +2811,8 @@
+         ent->sort.count = 0;
+         ent->sort.idx = 0;
+         ent->sort.entries = 0;
+ #ifdef _WIN32
+-        if ((capacity = dirp->nfiles) > 0) {
++        if (!tebako_fs_dir_is_embedded((tebako_dir_t) dirp) /* tebako patch */ && (capacity = dirp->nfiles) > 0) {
+             if (!(newp = GLOB_ALLOC_N(rb_dirent_t, capacity))) {
+                 check_closedir(dirp);
+                 return NULL;
 @@ -2849,7 +3017,7 @@
          }
  # endif
