@@ -1,0 +1,27 @@
+# openssl_ssl_default_store_crl_removal.patch
+#
+# Target:  ext/openssl/lib/openssl/ssl.rb (pass1 (all platforms))
+# Source:  ruby/openssl e8481cd687840f6d8247ca70967c1de47093ecb8
+#          "ssl: remove OpenSSL::X509::V_FLAG_CRL_CHECK_ALL from the default
+#          store" (fixes ruby/openssl#949; merged into the maint-3.1/3.2/3.3
+#          gem branches and master)
+#
+# The bundled openssl gem's default X509 store carries
+# V_FLAG_CRL_CHECK_ALL. OpenSSL 3.6 makes that flag imply V_FLAG_CRL_CHECK,
+# so every CRL-DP-bearing chain hard-fails verification with "unable to get
+# certificate CRL" against the default store (tebako-runtime-ruby#123).
+# Drop the flag assignment, matching the upstream removal byte-for-byte.
+# Selected only for patch releases whose vendored ssl.rb still sets the
+# flag; later releases already bundle the fixed ssl.rb upstream.
+diff --git a/ext/openssl/lib/openssl/ssl.rb b/ext/openssl/lib/openssl/ssl.rb
+index e557b8b..b69a509 100644
+--- a/ext/openssl/lib/openssl/ssl.rb
++++ b/ext/openssl/lib/openssl/ssl.rb
+@@ -92,7 +92,6 @@
+ 
+       DEFAULT_CERT_STORE = OpenSSL::X509::Store.new # :nodoc:
+       DEFAULT_CERT_STORE.set_default_paths
+-      DEFAULT_CERT_STORE.flags = OpenSSL::X509::V_FLAG_CRL_CHECK_ALL
+ 
+       # A callback invoked when DH parameters are required for ephemeral DH key
+       # exchange.

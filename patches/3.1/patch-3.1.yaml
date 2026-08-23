@@ -39,6 +39,10 @@ patches:
     file: makefile_in_static_ruby_link_msys.patch
   - feature: openssl_extconf_ruby_export_msys
     file: openssl_extconf_ruby_export_msys.patch
+  # CRL_CHECK_ALL default-store flag removed upstream (ruby/openssl#949);
+  # whole 3.1 line (openssl gem 3.0.1) still sets it
+  - feature: openssl_ssl_default_store_crl_removal
+    file: openssl_ssl_default_store_crl_removal.patch
   - feature: rubygems_openssl_require
     file: rubygems_openssl_require.patch
   - feature: thread_pthread_main_stack_musl

@@ -1,9 +1,7 @@
-# ruby 3.4.3 patch manifest (canonical tfs-ruby layout).
+# ruby 3.4.5 patch manifest (canonical tfs-ruby layout).
 # Entries apply in listed order. Schema: schema/patches.schema.yml.
-version: "3.4.3"
+version: "3.4.5"
 patches:
-  - feature: win32_clock_rename_msys
-    file: win32_clock_rename_msys.patch
   # bundled openssl gem 3.3.0 sets V_FLAG_CRL_CHECK_ALL on the default
   # store; OpenSSL 3.6 hard-fails CRL-DP chains (tebako-runtime-ruby#123).
   # removed upstream (ruby/openssl#949); vendored ssl.rb fixed >= 3.4.8
