@@ -378,8 +378,10 @@ if [ ! -f "$INSTALL_STAMP" ]; then
   # silent winner). Derive the set from the downloaded image's manifest
   # and skip it below (vendoring feeds stamping, so one skip covers both).
   # Empty against a pre-alias runtime: the vendoring behaves as before.
+  # The awk accepts both sequence styles — psych emits items at column 0
+  # ("- name:"), hand-written manifests indent them ("  - name:").
   RUNTIME_OWNED=" $("$TFS_CLI" cat "$(w "$RUNTIME_IMAGE")" /__tpkg__/manifest.yaml 2>/dev/null \
-    | awk '/^library_aliases:/{f=1;next} /^[^ ]/{f=0} f && /^  - name:/{print $3}' | tr '\n' ' ') "
+    | awk '/^library_aliases:/{f=1;next} f && /^[A-Za-z_]+:/{f=0} f && /^ *- name:/{print $NF}' | tr '\n' ' ') "
   echo "== spec22-gems-msys runtime-owned aliases:${RUNTIME_OWNED% }"
   # objdump path discipline (incident 13 round 2): the ucrt64 objdump is
   # a NATIVE exe and MSYS2_ARG_CONV_EXCL='*' disables bash's automatic
