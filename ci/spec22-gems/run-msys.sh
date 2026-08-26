@@ -365,10 +365,22 @@ if [ ! -f "$INSTALL_STAMP" ]; then
   # (libstdc++-6.dll → libgcc_s_seh-1.dll / libwinpthread-1.dll) lives in
   # $UCRT64_BIN on the host, NOT in the gem tree, so the materialized
   # module's closure would miss and the load would 126. Vendor the
-  # transitive closure next to each libsass.so copy BEFORE the press so
-  # the payload image is self-contained — existence-tested per name (OS
-  # DLLs the toolchain bin dir does not carry are skipped by rule), no
-  # hardcoded DLL list.
+  # transitive closure next to each libsass.so copy BEFORE the press —
+  # minus the RUNTIME_OWNED set below (the env image ships + declares
+  # those; a payload copy is dead bytes and a payload declaration is the
+  # driver's named ambiguity) — existence-tested per name (OS DLLs the
+  # toolchain bin dir does not carry are skipped by rule), no hardcoded
+  # DLL list.
+  # Runtime-owned names (tebako-runtime-ruby#133, spec 22 §2.1): the env
+  # image may itself ship + declare the toolchain's gcc-runtime set as
+  # library_aliases: — those names are the RUNTIME's, and a payload that
+  # also declares one is the driver's named authoring ambiguity (never a
+  # silent winner). Derive the set from the downloaded image's manifest
+  # and skip it below (vendoring feeds stamping, so one skip covers both).
+  # Empty against a pre-alias runtime: the vendoring behaves as before.
+  RUNTIME_OWNED=" $("$TFS_CLI" cat "$(w "$RUNTIME_IMAGE")" /__tpkg__/manifest.yaml 2>/dev/null \
+    | awk '/^library_aliases:/{f=1;next} /^[^ ]/{f=0} f && /^  - name:/{print $3}' | tr '\n' ' ') "
+  echo "== spec22-gems-msys runtime-owned aliases:${RUNTIME_OWNED% }"
   # objdump path discipline (incident 13 round 2): the ucrt64 objdump is
   # a NATIVE exe and MSYS2_ARG_CONV_EXCL='*' disables bash's automatic
   # argv conversion, so a POSIX spelling reaches it verbatim and it
@@ -395,6 +407,10 @@ if [ ! -f "$INSTALL_STAMP" ]; then
       for pe in "$so" "$dir"/*.dll; do
         [ -f "$pe" ] || continue
         for dll in $("$OBJDUMP_BIN" -p "$(vendor_path "$pe")" | awk '/DLL Name:/ {print $3}'); do
+          case "$RUNTIME_OWNED" in *" $dll "*)
+            echo "== spec22-gems-msys skipped runtime-owned $dll (import of $(basename "$pe"))"
+            continue ;;
+          esac
           if [ ! -f "$dir/$dll" ] && [ -f "$UCRT64_BIN/$dll" ]; then
             cp "$UCRT64_BIN/$dll" "$dir/"
             echo "== spec22-gems-msys vendored $dll -> $dir (import of $(basename "$pe"))"
@@ -467,10 +483,17 @@ if [ ! -f "$PAYLOAD_IMG" ] || [ ! -f "$PAYLOAD_IMG_NOMAT" ] \
     || die "the pressed image lost the materialize: key (spec 22 §4)"
   "$TFS_CLI" cat "$(w "$PAYLOAD_IMG_NOMAT")" /__tpkg__/manifest.yaml | grep -q "^materialize:" \
     && die "the negative-oracle image carries materialize: — the oracle would prove nothing"
-  "$TFS_CLI" cat "$(w "$PAYLOAD_IMG")" /__tpkg__/manifest.yaml | grep -q "^library_aliases:" \
-    || die "the pressed image lost the library_aliases: key (spec 22 §2.1)"
-  "$TFS_CLI" cat "$(w "$PAYLOAD_IMG_NOMAT")" /__tpkg__/manifest.yaml | grep -q "^library_aliases:" \
-    || die "the negative-oracle image lost the library_aliases: key (spec 22 §2.1)"
+  # The aliases assertions hold only when the payload still vendors DLLs
+  # of its own — with the toolchain set runtime-owned there may be
+  # nothing to stamp, and an absent key is then correct.
+  if [ -n "$(find "$PROBE_TREE/probe/gemhome/gems/sassc-$SASSC_VERSION" -name '*.dll' -print -quit 2>/dev/null)" ]; then
+    "$TFS_CLI" cat "$(w "$PAYLOAD_IMG")" /__tpkg__/manifest.yaml | grep -q "^library_aliases:" \
+      || die "the pressed image lost the library_aliases: key (spec 22 §2.1)"
+    "$TFS_CLI" cat "$(w "$PAYLOAD_IMG_NOMAT")" /__tpkg__/manifest.yaml | grep -q "^library_aliases:" \
+      || die "the negative-oracle image lost the library_aliases: key (spec 22 §2.1)"
+  else
+    echo "== spec22-gems-msys: the payload vendors no DLLs (the toolchain set is runtime-owned) — no library_aliases: to press"
+  fi
   # The gemhome tree must survive the press verbatim — the proof legs
   # discover gems ONLY from the image (incident 12: distinguish a
   # press-side drop from a runtime discovery miss before the legs run).
