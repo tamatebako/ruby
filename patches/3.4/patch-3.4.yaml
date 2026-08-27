@@ -58,6 +58,8 @@ patches:
     file: main_c_tebako_main.patch
   - feature: process_c_tebako_spawn
     file: process_c_tebako_spawn.patch
+  - feature: process_c_tebako_spawn_msys
+    file: process_c_tebako_spawn_msys.patch
   - feature: process_c_clock_guard_msys
     file: process_c_clock_guard_msys.patch
   - feature: mkconfig_memfs_prefix
