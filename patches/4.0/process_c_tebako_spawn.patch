@@ -47,7 +47,7 @@ diff --git a/process.c b/process.c
 index 97fa336..f55697e 100644
 --- a/process.c
 +++ b/process.c
-@@ -2834,6 +2834,240 @@ rb_execarg_get(VALUE execarg_obj)
+@@ -2834,6 +2834,412 @@ rb_execarg_get(VALUE execarg_obj)
      return eargp;
  }
  
@@ -280,8 +280,180 @@ index 97fa336..f55697e 100644
 +        free(mounts);
 +    }
 +}
-+#else
-+#define tfs_spawn_prepare(eargp) ((void)0)
++#else  /* _WIN32 */
++/* Windows argv bridging (spec 22 §3.2): no child-side preload exists on
++   windows — the driver's host tier materializes a dependency's declared
++   exes and leads PATH with their dirs, so a bare-name spawn RESOLVES,
++   but the child then runs plain-host and cannot see VFS paths handed to
++   it as ARGUMENTS (ruby-jing / mn2pdf: `java -jar <env-image jar>` — the
++   jar string resolves through ruby's VFS and the host java.exe cannot
++   read it; the packed-mn windows acceptance died on exactly that).
++   Bridge parent-side in this hook: any argument token naming an embedded
++   path is materialized through tebako_fs_exec_materialize (the
++   exec-target hook's own primitive — home-layout mounts extract
++   whole-tree, other mounts answer the file from the dlmap cache) and
++   rewritten to the host twin. Shell-form spawns (both known callers
++   join into one string) are tokenized on unquoted blanks honoring
++   double-quoted regions and rejoined with the separators preserved
++   byte-for-byte; a bridged token is always re-quoted (a materialized
++   path may carry spaces). Array form rebuilds invoke.cmd.argv_buf
++   (NUL-separated) and the argv_str pointer vector exactly as
++   rb_exec_fillarg built them. Non-embedded tokens pass through
++   byte-identical; a covered path the mounts do not hold keeps its
++   spelling — the child answers honestly (the exec-target hook's own
++   pass-through discipline). */
++
++/* Probe one token: a malloc'd host twin when the token names a mounted
++   path, NULL otherwise. One wrapping layer of double quotes is stripped
++   for the probe (an unquoted token holds no blanks by construction; a
++   quoted one may — either way the whole token is the path candidate). */
++static char *
++tfs_bridge_arg(const char *tok, size_t len)
++{
++    char *probe;
++    char *mapped;
++    if (len >= 2 && tok[0] == '"' && tok[len - 1] == '"') {
++        tok++;
++        len -= 2;
++    }
++    if (len == 0) return NULL;
++    probe = (char *)malloc(len + 1);
++    if (probe == NULL) return NULL;
++    memcpy(probe, tok, len);
++    probe[len] = '\0';
++    if (!tebako_path_is_embedded(probe)) {
++        free(probe);
++        return NULL;
++    }
++    mapped = tebako_fs_exec_materialize(probe);
++    free(probe);
++    return mapped;  /* NULL: covered but not held — pass through */
++}
++
++/* Shell form: rewrite the command line when any token bridges. Token
++   boundaries are unquoted blanks; the separators are copied as they
++   are, so an all-host command line stays byte-identical. */
++static void
++tfs_bridge_cmdline(VALUE *strp)
++{
++    const char *s;
++    long slen, i = 0;
++    int dirty = 0;
++    VALUE out;
++    if (!RB_TYPE_P(*strp, T_STRING)) return;
++    s = RSTRING_PTR(*strp);
++    slen = RSTRING_LEN(*strp);
++    out = rb_str_buf_new(slen + 32);
++    while (i < slen) {
++        long start, tlen;
++        char *twin;
++        while (i < slen && (s[i] == ' ' || s[i] == '\t')) {
++            rb_str_buf_cat(out, s + i, 1);
++            i++;
++        }
++        if (i >= slen) break;
++        start = i;
++        {
++            int inq = 0;
++            while (i < slen) {
++                char c = s[i];
++                if (c == '"')
++                    inq = !inq;
++                else if ((c == ' ' || c == '\t') && !inq)
++                    break;
++                i++;
++            }
++        }
++        tlen = i - start;
++        twin = tfs_bridge_arg(s + start, (size_t)tlen);
++        if (twin != NULL) {
++            rb_str_buf_cat(out, "\"", 1);
++            rb_str_buf_cat(out, twin, strlen(twin));
++            rb_str_buf_cat(out, "\"", 1);
++            free(twin);
++            dirty = 1;
++        }
++        else {
++            rb_str_buf_cat(out, s + start, (size_t)tlen);
++        }
++    }
++    if (dirty) *strp = out;
++    RB_GC_GUARD(out);
++}
++
++/* Array form: bridge the NUL-separated argv_buf tokens, then rebuild
++   the argv_str pointer vector exactly as rb_exec_fillarg built it (the
++   vector points INTO the buffer's storage — a rebuilt buffer means a
++   rebuilt vector). */
++static void
++tfs_bridge_argv(struct rb_execarg *eargp)
++{
++    VALUE buf = eargp->invoke.cmd.argv_buf;
++    const char *p;
++    const char *ep;
++    VALUE nbuf;
++    int dirty = 0;
++    if (!RB_TYPE_P(buf, T_STRING)) return;
++    p = RSTRING_PTR(buf);
++    ep = p + RSTRING_LEN(buf);
++    nbuf = hide_obj(rb_str_buf_new(RSTRING_LEN(buf) + 32));
++    while (p < ep) {
++        size_t tlen = strlen(p);
++        char *twin = tfs_bridge_arg(p, tlen);
++        if (twin != NULL) {
++            rb_str_buf_cat(nbuf, twin, strlen(twin) + 1);
++            free(twin);
++            dirty = 1;
++        }
++        else {
++            rb_str_buf_cat(nbuf, p, tlen + 1);
++        }
++        p += tlen + 1;
++    }
++    if (!dirty) {
++        RB_GC_GUARD(nbuf);
++        return;
++    }
++    eargp->invoke.cmd.argv_buf = nbuf;
++    {
++        const char *q = RSTRING_PTR(nbuf);
++        const char *eq = q + RSTRING_LEN(nbuf);
++        const char *null = NULL;
++        VALUE av = hide_obj(rb_str_buf_new(0));
++        rb_str_buf_cat(av, (char *)&null, sizeof(null)); /* try_with_sh placeholder */
++        while (q < eq) {
++            rb_str_buf_cat(av, (char *)&q, sizeof(q));
++            q += strlen(q) + 1;
++        }
++        rb_str_buf_cat(av, (char *)&null, sizeof(null));
++        eargp->invoke.cmd.argv_str =
++            rb_imemo_tmpbuf_auto_free_pointer_new_from_an_RString(av);
++    }
++}
++
++static void
++tfs_spawn_prepare(struct rb_execarg *eargp)
++{
++    if (eargp->use_shell) {
++        tfs_bridge_cmdline(&eargp->invoke.sh.shell_script);
++        return;
++    }
++    /* Array form: an absolute in-VFS exec TARGET materializes by the
++       same rule the POSIX hook applies (a bare name resolves host-side
++       through the driver's PATH prepend and is never embedded). */
++    if (RB_TYPE_P(eargp->invoke.cmd.command_name, T_STRING)) {
++        const char *prog = RSTRING_PTR(eargp->invoke.cmd.command_name);
++        if (tebako_path_is_embedded(prog)) {
++            char *mapped = tebako_fs_exec_materialize(prog);
++            if (mapped != NULL) {
++                eargp->invoke.cmd.command_name = rb_str_new_cstr(mapped);
++                eargp->invoke.cmd.command_abspath = rb_str_new_cstr(mapped);
++                free(mapped);
++            }
++        }
++    }
++    tfs_bridge_argv(eargp);
++}
 +#endif
 +/* -- End of tebako patch -- */
 +
