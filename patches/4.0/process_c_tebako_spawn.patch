@@ -42,12 +42,18 @@
 # pre-materialize check could not read. An unreadable file or a
 # malformed shebang falls back to the own-path verdict (ruby#96 —
 # defense-in-depth parity with the v0.2.4 driver-side scrub, tebako#451).
+# win32 (no preload inheritance): the hook additionally BRIDGES embedded
+# argv tokens — shell-form cmdline and the argv_buf/argv_str vector are
+# rewritten token-by-token through tfs_bridge_arg, and an embedded exec
+# target materializes host-side (spec 22 §3.2). The 4.0 series builds
+# argv_str with rb_imemo_tmpbuf_new_from_an_RString (the 3.x
+# auto_free_pointer variant was folded into it; ruby#104).
 # X-Redesign: v2-spawn
 diff --git a/process.c b/process.c
 index 97fa336..f55697e 100644
 --- a/process.c
 +++ b/process.c
-@@ -2834,6 +2834,412 @@ rb_execarg_get(VALUE execarg_obj)
+@@ -2834,6 +2834,416 @@ rb_execarg_get(VALUE execarg_obj)
      return eargp;
  }
  
@@ -427,7 +433,11 @@ index 97fa336..f55697e 100644
 +        }
 +        rb_str_buf_cat(av, (char *)&null, sizeof(null));
 +        eargp->invoke.cmd.argv_str =
-+            rb_imemo_tmpbuf_auto_free_pointer_new_from_an_RString(av);
++            /* 4.0 folded the 3.x auto_free_pointer variant into the one
++               tmpbuf constructor — same xmalloc+copy+own semantics, and
++               rb_imemo_free xfree's every tmpbuf's ptr (imemo.c); 4.0's
++               own rb_exec_fillarg spells it this way. */
++            rb_imemo_tmpbuf_new_from_an_RString(av);
 +    }
 +}
 +
@@ -460,7 +470,7 @@ index 97fa336..f55697e 100644
  static VALUE
  rb_execarg_init(int argc, const VALUE *orig_argv, int accept_shell, VALUE execarg_obj)
  {
-@@ -2846,6 +3080,9 @@ rb_execarg_init(int argc, const VALUE *orig_argv, int accept_shell, VALUE execar
+@@ -2846,6 +3084,9 @@ rb_execarg_init(int argc, const VALUE *orig_argv, int accept_shell, VALUE execar
      prog = rb_exec_getargs(&argc, &argv, accept_shell, &env, &opthash);
      rb_exec_fillarg(prog, argc, argv, env, opthash, execarg_obj);
      ALLOCV_END(argv_buf);
