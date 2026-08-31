@@ -48,12 +48,27 @@
 # target materializes host-side (spec 22 §3.2). The 4.0 series builds
 # argv_str with rb_imemo_tmpbuf_new_from_an_RString (the 3.x
 # auto_free_pointer variant was folded into it; ruby#104).
+# spec 30 §2 (tebako v2.1.0): the POSIX hook's head offers every
+# array-form spawn to the driver's spawned-runtime planner
+# (tebako_spawn_runtime_plan — a WEAK extern: runtimes linked against
+# pre-2.1.0 link units carry no such symbol and pass every spawn through
+# exactly as before). A planned bare name (the app payload's
+# requires[].expose surface) retargets the exec pair to the store's
+# runtime exe, rebuilds argv_buf/argv_str from the plan (the plan's
+# argv[0] is the exe; ruby re-prepends it at exec), and applies the
+# plan's env ops (KEY=VALUE sets, bare KEY deletes) into
+# env_modification. A named error raises — the spawn NEVER falls through
+# to a host binary of the same name. The head runs BEFORE the darwin
+# restricted-target scrub: a planned spawn's target is the store's exe,
+# and the scrub must not pre-empt a plan for a bare name that shadows a
+# system stub (/usr/bin/java). Shell-form spawns never plan; their
+# darwin scrub path is unchanged.
 # X-Redesign: v2-spawn
 diff --git a/process.c b/process.c
 index 97fa336..f55697e 100644
 --- a/process.c
 +++ b/process.c
-@@ -2834,6 +2834,416 @@ rb_execarg_get(VALUE execarg_obj)
+@@ -2834,6 +2834,557 @@ rb_execarg_get(VALUE execarg_obj)
      return eargp;
  }
  
@@ -83,14 +98,10 @@ index 97fa336..f55697e 100644
 +                                           EXPORT_STR(rb_str_new_cstr(val)))));
 +}
 +
-+#if defined(__APPLE__)
-+/* dyld TERMINATES an Apple-restricted binary at exec when
-+   DYLD_INSERT_LIBRARIES names a foreign dylib (factory run 31699651270,
-+   macos arm64 darwin24: /bin/sh and /usr/bin/cc died under the armed
-+   env; darwin23 stripped the variable instead — spec 22 §3.1). Drop the
-+   inherited variable per spawn whose target is restricted; the nil pair
-+   DELETES the inherited entry (rb_execarg_parent_start1's NIL_P branch,
-+   st_delete). */
++/* Delete KEY from the child's environment: the nil pair DELETES the
++   inherited entry (rb_execarg_parent_start1's NIL_P branch, st_delete).
++   The spawn plan's bare-KEY env ops (spec 30 §2) and the darwin
++   restricted-target scrub (spec 22 §3.1) share the primitive. */
 +static void
 +tfs_env_unset(struct rb_execarg *eargp, const char *key)
 +{
@@ -103,6 +114,7 @@ index 97fa336..f55697e 100644
 +                                           Qnil)));
 +}
 +
++#if defined(__APPLE__)
 +/* execvp's PATH search mirrored parent-side (empty elements mean "."):
 +   the first executable candidate wins; no hit returns prog unchanged —
 +   the child's own search then fails the same way. */
@@ -213,13 +225,107 @@ index 97fa336..f55697e 100644
 +}
 +#endif
 +
++/* spec 30 §2's spawned-runtime planner, exported by the driver
++   (tebako-driver ffi.rs; exports.txt owns the surface). WEAK on
++   purpose: a runtime linked against a pre-2.1.0 link unit carries no
++   such symbol — the reference then reads NULL and every spawn passes
++   through exactly as before; a strong reference would break those
++   lines at link time. */
++extern int tebako_spawn_runtime_plan(const char *command,
++                                     const char *args_packed, size_t args_len,
++                                     char **out_exe,
++                                     char **out_argv, size_t *out_argv_len,
++                                     char **out_env, size_t *out_env_len,
++                                     char **out_error)
++#if defined(__APPLE__)
++    __attribute__((weak_import));
++#else
++    __attribute__((weak));
++#endif
++
++/* The plan's env ops in application order: "KEY=VALUE" sets, a bare
++   "KEY" deletes (spec 30 §2's wire). tfs_env_set/unset copy into ruby
++   strings, so the scratch key is freed here. */
++static void
++tfs_spawn_env_ops(struct rb_execarg *eargp, const char *ops, size_t len)
++{
++    const char *p = ops;
++    const char *ep = ops + len;
++    while (p < ep) {
++        size_t tlen = strlen(p);
++        const char *eq = memchr(p, '=', tlen);
++        if (eq == NULL) {
++            char *k = (char *)malloc(tlen + 1);
++            if (k != NULL) {
++                memcpy(k, p, tlen);
++                k[tlen] = '\0';
++                tfs_env_unset(eargp, k);
++                free(k);
++            }
++        }
++        else {
++            size_t klen = (size_t)(eq - p);
++            char *k = (char *)malloc(klen + 1);
++            if (k != NULL) {
++                memcpy(k, p, klen);
++                k[klen] = '\0';
++                tfs_env_set(eargp, k, eq + 1);
++                free(k);
++            }
++        }
++        p += tlen + 1;
++    }
++}
++
++/* A planned spawn (spec 30 §2): the plan's exe becomes the exec pair;
++   argv_buf takes the plan's tokens AFTER argv[0] (ruby re-prepends the
++   program at exec from command_abspath — and the plan's argv[0] IS that
++   exe); argv_str's pointer vector is rebuilt into the new buffer exactly
++   as rb_exec_fillarg built it (the vector points INTO the buffer's
++   storage, so a new buffer means a rebuilt vector). */
++static void
++tfs_spawn_plan_apply(struct rb_execarg *eargp, const char *exe,
++                     const char *argv, size_t argv_len,
++                     const char *env, size_t env_len)
++{
++    const char *p = argv;
++    const char *ep = argv + argv_len;
++    const char *null = NULL;
++    VALUE nbuf;
++    VALUE av;
++    eargp->invoke.cmd.command_name = rb_str_new_cstr(exe);
++    eargp->invoke.cmd.command_abspath = rb_str_new_cstr(exe);
++    if (p < ep) p += strlen(p) + 1;  /* the plan's argv[0] is the exe */
++    nbuf = hide_obj(rb_str_buf_new((ep - p) + 1));
++    while (p < ep) {
++        rb_str_buf_cat(nbuf, p, strlen(p) + 1);
++        p += strlen(p) + 1;
++    }
++    eargp->invoke.cmd.argv_buf = nbuf;
++    av = hide_obj(rb_str_buf_new(0));
++    rb_str_buf_cat(av, (char *)&null, sizeof(null)); /* try_with_sh placeholder */
++    {
++        const char *q = RSTRING_PTR(nbuf);
++        const char *eq = q + RSTRING_LEN(nbuf);
++        while (q < eq) {
++            rb_str_buf_cat(av, (char *)&q, sizeof(q));
++            q += strlen(q) + 1;
++        }
++    }
++    rb_str_buf_cat(av, (char *)&null, sizeof(null));
++    eargp->invoke.cmd.argv_str =
++        rb_imemo_tmpbuf_new_from_an_RString(av);
++    if (env != NULL && env_len > 0) tfs_spawn_env_ops(eargp, env, env_len);
++}
++
 +/* Spawn of a memfs-resident binary: materialize the exec target to the
 +   host cache, point command_abspath at it (the child execve()s
 +   command_abspath; command_name follows for error reporting), and put
 +   the preload shim + the current mounts into the child's environment so
-+   its own IO resolves through the VFS.  Shell-form spawns and bare
-+   command names (PATH search) do not resolve through the VFS — spawn
-+   with an absolute in-VFS path. */
++   its own IO resolves through the VFS.  Shell-form spawns do not
++   resolve through the VFS, and neither do bare command names (PATH
++   search) — but a bare name the app payload EXPOSES as a spawned
++   runtime (spec 30 §2) plans into a full child boot FIRST, below. */
 +static void
 +tfs_spawn_prepare(struct rb_execarg *eargp)
 +{
@@ -230,17 +336,67 @@ index 97fa336..f55697e 100644
 +    char *mounts;
 +
 +#if defined(__APPLE__)
-+    /* The scrub first: a restricted target dies under the inherited
-+       variable at exec, before the VFS flow below could matter. */
-+    if (tfs_spawn_target_restricted(eargp)) {
-+        tfs_env_unset(eargp, "DYLD_INSERT_LIBRARIES");
++    /* Shell form stays on the legacy scrub (the plan head is array-form
++       only; tebako#448's /bin/sh rule is unchanged). */
++    if (eargp->use_shell) {
++        if (tfs_spawn_target_restricted(eargp)) {
++            tfs_env_unset(eargp, "DYLD_INSERT_LIBRARIES");
++        }
 +        return;
 +    }
 +#endif
 +
 +    if (eargp->use_shell || !RB_TYPE_P(eargp->invoke.cmd.command_name, T_STRING)) return;
 +    prog = RSTRING_PTR(eargp->invoke.cmd.command_name);
-+    if (prog == NULL || !tebako_path_is_embedded(prog)) return;
++    if (prog == NULL) return;
++
++    /* The plan head runs BEFORE the platform scrub and the VFS flow:
++       a planned bare name retargets to the store's runtime exe, and a
++       named error must never fall through to a host binary of the same
++       name (spec 30 §2). */
++    if (tebako_spawn_runtime_plan != NULL) {
++        VALUE buf = eargp->invoke.cmd.argv_buf;
++        const char *args = NULL;
++        size_t args_len = 0;
++        char *exe = NULL;
++        char *argv = NULL;
++        char *env = NULL;
++        char *err = NULL;
++        size_t argv_len = 0;
++        size_t env_len = 0;
++        int rc;
++        if (RB_TYPE_P(buf, T_STRING)) {
++            args = RSTRING_PTR(buf);
++            args_len = (size_t)RSTRING_LEN(buf);
++        }
++        rc = tebako_spawn_runtime_plan(prog, args, args_len,
++                                       &exe, &argv, &argv_len,
++                                       &env, &env_len, &err);
++        if (rc < 0) {
++            VALUE msg = rb_str_new_cstr(err != NULL ? err
++                                        : "spawn plan failed without a message");
++            free(err);
++            rb_exc_raise(rb_exc_new_str(rb_eRuntimeError, msg));
++        }
++        if (rc == 1) {
++            tfs_spawn_plan_apply(eargp, exe, argv, argv_len, env, env_len);
++            free(exe);
++            free(argv);
++            free(env);
++            return;
++        }
++    }
++
++#if defined(__APPLE__)
++    /* The scrub: a restricted target dies under the inherited variable
++       at exec, before the VFS flow below could matter. */
++    if (tfs_spawn_target_restricted(eargp)) {
++        tfs_env_unset(eargp, "DYLD_INSERT_LIBRARIES");
++        return;
++    }
++#endif
++
++    if (!tebako_path_is_embedded(prog)) return;
 +    mapped = tebako_fs_exec_materialize(prog);
 +    if (mapped == NULL) return;  /* covered but not held: a host path — exec answers honestly */
 +    eargp->invoke.cmd.command_name = rb_str_new_cstr(mapped);
@@ -470,7 +626,7 @@ index 97fa336..f55697e 100644
  static VALUE
  rb_execarg_init(int argc, const VALUE *orig_argv, int accept_shell, VALUE execarg_obj)
  {
-@@ -2846,6 +3084,9 @@ rb_execarg_init(int argc, const VALUE *orig_argv, int accept_shell, VALUE execar
+@@ -2846,6 +3225,9 @@ rb_execarg_init(int argc, const VALUE *orig_argv, int accept_shell, VALUE execar
      prog = rb_exec_getargs(&argc, &argv, accept_shell, &env, &opthash);
      rb_exec_fillarg(prog, argc, argv, env, opthash, execarg_obj);
      ALLOCV_END(argv_buf);
