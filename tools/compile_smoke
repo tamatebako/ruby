@@ -43,7 +43,8 @@ INCLUDED_C = {
 PLATFORM_CONFIG = {
   "linux-gnu" => { "env" => {}, "configure" => [] },
   "linux-musl" => { "env" => { "CC" => "musl-gcc" }, "configure" => [] },
-  "msys" => { "env" => {}, "configure" => ["--host=x86_64-w64-mingw32"] }
+  "msys" => { "env" => {}, "configure" => ["--host=x86_64-w64-mingw32"] },
+  "darwin" => { "env" => {}, "configure" => [] }
 }.freeze
 
 def native_platform
@@ -51,6 +52,7 @@ def native_platform
   when /linux-musl/ then "linux-musl"
   when /linux/ then "linux-gnu"
   when /msys|mingw|cygwin/ then "msys"
+  when /darwin/ then "darwin"
   else abort "tools/compile_smoke: cannot detect platform #{RUBY_PLATFORM}; pass --platform"
   end
 end
@@ -58,7 +60,7 @@ end
 options = { platform: nil, pass: 2 }
 OptionParser.new do |parser|
   parser.banner = "usage: tools/compile_smoke <version> [outdir] [--platform NAME] [--pass 1|2]"
-  parser.on("--platform NAME", "linux-gnu | linux-musl | msys (default: host)") { |v| options[:platform] = v }
+  parser.on("--platform NAME", "linux-gnu | linux-musl | msys | darwin (default: host)") { |v| options[:platform] = v }
   parser.on("--pass N", Integer, "GNUmakefile.in pass variant, 1 or 2 (default: 2, final build)") { |v| options[:pass] = v }
 end.parse!
 
