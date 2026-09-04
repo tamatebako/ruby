@@ -1,53 +1,28 @@
-# process_c_tebako_spawn.patch
+# process_c_tebako_spawn_msys.patch
 #
-# Target:  process.c (pass2 (all platforms))
-# Source:  v2 design (TODO.testing/08 — exec of memfs-resident binaries)
+# Target:  process.c (pass2 (msys))
+# Source:  msys carrier of process_c_tebako_spawn.patch — the diff payload
+# below is BYTE-IDENTICAL to the neutral patch's, from the diff --git line
+# onward (spec/tfs/spawn_patch_parity_spec.rb pins the identity: any
+# change to the neutral patch lands here in the same commit).
 #
-# Spawn of a memfs-resident binary: the kernel never sees the memfs, so
-# an exec target HELD by the mounts (tebako_path_is_embedded) is
-# materialized to the host cache (tebako_fs_exec_materialize — home-layout mounts whole-tree) and the exec
-# pair (command_name, command_abspath — the child execve()s
-# command_abspath) is pointed at the host copy. The child re-enters the
-# namespace through the preload shim (DYLD_INSERT_LIBRARIES/LD_PRELOAD
-# at the in-VFS path read from TEBAKO_PRELOAD_SHIM — the driver's flow
-# of the env image's layout grant, with a literal fallback for images
-# predating the grant) plus the current mounts (TEBAKO_TFS_MOUNTS),
-# injected via env_modification in ruby's internal representation
-# (hidden array of hidden [key, val] pairs — a hash here crashes
-# parent_start1).
-# Host targets pass through untouched; a covered path the mounts do not
-# hold answers ENOENT and exec fails honestly. Shell-form spawns and
-# bare command names (PATH search) do not resolve through the VFS.
-# The hook is parent-side (before fork), so the materialization work
-# (malloc/extract) never runs in the async-signal-safe child.
-# darwin24 (macos arm64, factory run 31699651270): dyld TERMINATES an
-# Apple-restricted binary at exec when the inherited
-# DYLD_INSERT_LIBRARIES names a foreign dylib — darwin23 stripped the
-# variable instead. Under the driver's process-wide export that killed
-# /bin/sh and /usr/bin/cc for every system()/backtick of a packaged
-# interpreter. The hook drops the inherited variable per spawn whose
-# target is restricted (any shell form; anything resolving into Apple's
-# system binary dirs) — a restricted target can never honor the
-# insertion on any host, so the scrub loses nothing. Non-restricted
-# host targets (a third-party JRE) keep the driver's delivery — spec 22
-# §3.1's array form.
-# A #! script's exec target is its INTERPRETER, not the script: execve
-# of `#!/bin/sh` loads /bin/sh — a fat Apple-restricted binary on the
-# runners — which dies under the armed env exactly as if it had been
-# named directly (tebako#448; the deploy tree's o/p/ruby is such a
-# script). The hook parses the shebang line (first whitespace-delimited
-# token after "#!", leading blanks skipped, CRLF tolerated) and applies
-# the restricted check to the interpreter — pre-exec on the spawn
-# target's own path and again on the materialized host copy, which the
-# pre-materialize check could not read. An unreadable file or a
-# malformed shebang falls back to the own-path verdict (ruby#96 —
-# defense-in-depth parity with the v0.2.4 driver-side scrub, tebako#451).
-# X-Redesign: v2-spawn
+# Why the fork exists: patch selection (tools/lib/tfs/patch_selection.rb)
+# drops a neutral patch on msys when ANY msys-suffixed patch shares its
+# target file, and process_c_clock_guard_msys targets process.c on
+# 3.2/3.3/3.4. Without this carrier the whole spawn hook silently vanishes
+# from windows builds — exactly what shipped in runtime 0.16.20 when
+# ruby#107 updated only the neutral patch: the fork predated the spec 30
+# plan machinery, so the 3.2/3.3/3.4 windows runtimes had no spawn
+# planner at all (packed-mn#254 windows: '"java" is not recognized').
+# 3.1 and 4.0 carry no clock guard, the neutral patch applies on msys
+# there, and no carrier exists for them.
+#
+# The design notes live in the neutral patch's header.
 diff --git a/process.c b/process.c
 index 97fa336..f55697e 100644
 --- a/process.c
 +++ b/process.c
-@@ -2834,6 +2834,412 @@ rb_execarg_get(VALUE execarg_obj)
+@@ -2834,6 +2834,818 @@ rb_execarg_get(VALUE execarg_obj)
      return eargp;
  }
  
@@ -59,7 +34,6 @@ index 97fa336..f55697e 100644
 +#include <stdio.h>               /* fopen/fread */
 +#include <sys/stat.h>            /* stat, S_ISREG */
 +
-+#ifndef _WIN32
 +/* Push KEY=VAL into eargp->env_modification using ruby's internal
 +   representation: a hidden array of hidden [key, val] pairs (see
 +   check_exec_env_i).  rb_execarg_parent_start1 applies pairs in order
@@ -77,14 +51,10 @@ index 97fa336..f55697e 100644
 +                                           EXPORT_STR(rb_str_new_cstr(val)))));
 +}
 +
-+#if defined(__APPLE__)
-+/* dyld TERMINATES an Apple-restricted binary at exec when
-+   DYLD_INSERT_LIBRARIES names a foreign dylib (factory run 31699651270,
-+   macos arm64 darwin24: /bin/sh and /usr/bin/cc died under the armed
-+   env; darwin23 stripped the variable instead — spec 22 §3.1). Drop the
-+   inherited variable per spawn whose target is restricted; the nil pair
-+   DELETES the inherited entry (rb_execarg_parent_start1's NIL_P branch,
-+   st_delete). */
++/* Delete KEY from the child's environment: the nil pair DELETES the
++   inherited entry (rb_execarg_parent_start1's NIL_P branch, st_delete).
++   The spawn plan's bare-KEY env ops (spec 30 §2) and the darwin
++   restricted-target scrub (spec 22 §3.1) share the primitive. */
 +static void
 +tfs_env_unset(struct rb_execarg *eargp, const char *key)
 +{
@@ -97,6 +67,145 @@ index 97fa336..f55697e 100644
 +                                           Qnil)));
 +}
 +
++/* spec 30 §2's spawned-runtime planner, exported by the driver
++   (tebako-driver ffi.rs; exports.txt owns the surface). WEAK where
++   the platform allows: a runtime linked against a pre-2.1.0 link
++   unit carries no such symbol — the reference then reads NULL and
++   every spawn passes through exactly as before; a strong reference
++   would break those lines at link time. Windows links STRONG (PE
++   has no weak externs): the factory's link-unit pin (>= v2.1.0)
++   always carries the symbol, so a mismatch fails the build loudly,
++   never degrades silently at run time. */
++extern int tebako_spawn_runtime_plan(const char *command,
++                                     const char *args_packed, size_t args_len,
++                                     char **out_exe,
++                                     char **out_argv, size_t *out_argv_len,
++                                     char **out_env, size_t *out_env_len,
++                                     char **out_error)
++#if defined(__APPLE__)
++    __attribute__((weak_import));
++#elif defined(_WIN32)
++    ;
++#else
++    __attribute__((weak));
++#endif
++
++/* The plan's env ops in application order: "KEY=VALUE" sets, a bare
++   "KEY" deletes (spec 30 §2's wire). tfs_env_set/unset copy into ruby
++   strings, so the scratch key is freed here. */
++static void
++tfs_spawn_env_ops(struct rb_execarg *eargp, const char *ops, size_t len)
++{
++    const char *p = ops;
++    const char *ep = ops + len;
++    while (p < ep) {
++        size_t tlen = strlen(p);
++        const char *eq = memchr(p, '=', tlen);
++        if (eq == NULL) {
++            char *k = (char *)malloc(tlen + 1);
++            if (k != NULL) {
++                memcpy(k, p, tlen);
++                k[tlen] = '\0';
++                tfs_env_unset(eargp, k);
++                free(k);
++            }
++        }
++        else {
++            size_t klen = (size_t)(eq - p);
++            char *k = (char *)malloc(klen + 1);
++            if (k != NULL) {
++                memcpy(k, p, klen);
++                k[klen] = '\0';
++                tfs_env_set(eargp, k, eq + 1);
++                free(k);
++            }
++        }
++        p += tlen + 1;
++    }
++}
++
++/* A planned spawn (spec 30 §2): the plan's exe becomes the exec pair;
++   argv_buf takes the plan's tokens AFTER argv[0] (ruby re-prepends the
++   program at exec from command_abspath — and the plan's argv[0] IS that
++   exe); argv_str's pointer vector is rebuilt into the new buffer exactly
++   as rb_exec_fillarg built it (the vector points INTO the buffer's
++   storage, so a new buffer means a rebuilt vector). */
++static void
++tfs_spawn_plan_apply(struct rb_execarg *eargp, const char *exe,
++                     const char *argv, size_t argv_len,
++                     const char *env, size_t env_len)
++{
++    const char *p = argv;
++    const char *ep = argv + argv_len;
++    const char *null = NULL;
++    VALUE nbuf;
++    VALUE av;
++    eargp->invoke.cmd.command_name = rb_str_new_cstr(exe);
++    eargp->invoke.cmd.command_abspath = rb_str_new_cstr(exe);
++    if (p < ep) p += strlen(p) + 1;  /* the plan's argv[0] is the exe */
++    nbuf = hide_obj(rb_str_buf_new((ep - p) + 1));
++    while (p < ep) {
++        rb_str_buf_cat(nbuf, p, strlen(p) + 1);
++        p += strlen(p) + 1;
++    }
++    eargp->invoke.cmd.argv_buf = nbuf;
++    av = hide_obj(rb_str_buf_new(0));
++    rb_str_buf_cat(av, (char *)&null, sizeof(null)); /* try_with_sh placeholder */
++    {
++        const char *q = RSTRING_PTR(nbuf);
++        const char *eq = q + RSTRING_LEN(nbuf);
++        while (q < eq) {
++            rb_str_buf_cat(av, (char *)&q, sizeof(q));
++            q += strlen(q) + 1;
++        }
++    }
++    rb_str_buf_cat(av, (char *)&null, sizeof(null));
++    eargp->invoke.cmd.argv_str =
++        rb_imemo_tmpbuf_auto_free_pointer_new_from_an_RString(av);
++    if (env != NULL && env_len > 0) tfs_spawn_env_ops(eargp, env, env_len);
++}
++
++/* The plan head, shared by both platform hooks: offer the spawn to
++   the driver's planner. Returns 1 when a plan was applied (the exec
++   pair, argv, and env ops all replaced), 0 on pass-through (not an
++   exposed name — or a pre-2.1.0 link unit, where the weak
++   reference reads NULL). A named error raises — the spawn NEVER
++   falls through to a host binary of the same name. `args` may be
++   NULL with args_len 0 (the windows shell form plans with no known
++   arguments — the PATH launcher tier's own behavior, spec 30 §3). */
++static int
++tfs_spawn_plan_head(struct rb_execarg *eargp, const char *prog,
++                    const char *args, size_t args_len)
++{
++    char *exe = NULL;
++    char *argv = NULL;
++    char *env = NULL;
++    char *err = NULL;
++    size_t argv_len = 0;
++    size_t env_len = 0;
++    int rc;
++#ifndef _WIN32
++    if (tebako_spawn_runtime_plan == NULL) return 0;
++#endif
++    rc = tebako_spawn_runtime_plan(prog, args, args_len,
++                                   &exe, &argv, &argv_len,
++                                   &env, &env_len, &err);
++    if (rc < 0) {
++        VALUE msg = rb_str_new_cstr(err != NULL ? err
++                                    : "spawn plan failed without a message");
++        free(err);
++        rb_exc_raise(rb_exc_new_str(rb_eRuntimeError, msg));
++    }
++    if (rc != 1) return 0;
++    tfs_spawn_plan_apply(eargp, exe, argv, argv_len, env, env_len);
++    free(exe);
++    free(argv);
++    free(env);
++    return 1;
++}
++
++#ifndef _WIN32
++#if defined(__APPLE__)
 +/* execvp's PATH search mirrored parent-side (empty elements mean "."):
 +   the first executable candidate wins; no hit returns prog unchanged —
 +   the child's own search then fails the same way. */
@@ -207,13 +316,132 @@ index 97fa336..f55697e 100644
 +}
 +#endif
 +
++/* Shell-form argument bridging (spec 22 §3.1): a shell-string spawn
++   (backticks, `system "cmd …"`) never plans, and the shell's own
++   exec target stays the host's — but the string can carry ARGUMENT
++   tokens naming in-VFS paths the shell's children cannot read
++   (ruby-jing's `java -jar <in-image jar> … 2>&1`: the wrap-bin
++   launcher serves `java` itself, then the child JVM cannot open the
++   jar — the packed-mn OIML leg died on exactly that). Bridge
++   parent-side: tokenize on unquoted blanks honoring single and
++   double quotes (backslash escapes are not parsed — the known
++   callers emit none), probe each token with one wrapping quote
++   layer stripped, and rewrite an embedded hit to its materialized
++   host twin — tebako_fs_exec_materialize, the exec-target hook's
++   own primitive (home-layout mounts extract whole-tree, other
++   mounts answer the file). Separators copy byte-for-byte, so an
++   all-host string stays byte-identical; a bridged token re-quotes
++   single (a materialized path may carry blanks or a '$'; single
++   quotes protect every byte but a quote, which rides the '\''
++   idiom). A covered path the mounts do not hold keeps its
++   spelling — the child answers honestly (the exec-target hook's
++   own pass-through discipline). */
++
++/* Probe one token: a malloc'd host twin when the token names a
++   mounted path, NULL otherwise. One wrapping quote layer (single
++   or double) is stripped for the probe. */
++static char *
++tfs_bridge_arg(const char *tok, size_t len)
++{
++    char *probe;
++    char *mapped;
++    if (len >= 2 && ((tok[0] == '"' && tok[len - 1] == '"') ||
++                     (tok[0] == '\'' && tok[len - 1] == '\''))) {
++        tok++;
++        len -= 2;
++    }
++    if (len == 0) return NULL;
++    probe = (char *)malloc(len + 1);
++    if (probe == NULL) return NULL;
++    memcpy(probe, tok, len);
++    probe[len] = '\0';
++    if (!tebako_path_is_embedded(probe)) {
++        free(probe);
++        return NULL;
++    }
++    mapped = tebako_fs_exec_materialize(probe);
++    free(probe);
++    return mapped;  /* NULL: covered but not held — pass through */
++}
++
++/* Append a host twin single-quoted for /bin/sh: '…' with an
++   interior quote riding the '\'' idiom. */
++static void
++tfs_bridge_cat_quoted(VALUE out, const char *twin)
++{
++    const char *p;
++    rb_str_buf_cat(out, "'", 1);
++    for (p = twin; *p != '\0'; p++) {
++        if (*p == '\'')
++            rb_str_buf_cat(out, "'\\''", 4);
++        else
++            rb_str_buf_cat(out, p, 1);
++    }
++    rb_str_buf_cat(out, "'", 1);
++}
++
++/* Shell form: rewrite the command string when any token bridges.
++   Token boundaries are unquoted blanks; the separators are copied
++   as they are, so an all-host command line stays byte-identical. */
++static void
++tfs_bridge_cmdline(VALUE *strp)
++{
++    const char *s;
++    long slen, i = 0;
++    int dirty = 0;
++    VALUE out;
++    if (!RB_TYPE_P(*strp, T_STRING)) return;
++    s = RSTRING_PTR(*strp);
++    slen = RSTRING_LEN(*strp);
++    out = rb_str_buf_new(slen + 32);
++    while (i < slen) {
++        long start, tlen;
++        char *twin;
++        while (i < slen && (s[i] == ' ' || s[i] == '\t')) {
++            rb_str_buf_cat(out, s + i, 1);
++            i++;
++        }
++        if (i >= slen) break;
++        start = i;
++        {
++            char q = '\0';
++            while (i < slen) {
++                char c = s[i];
++                if (q == '\0') {
++                    if (c == ' ' || c == '\t') break;
++                    if (c == '\'' || c == '"') q = c;
++                }
++                else if (c == q) {
++                    q = '\0';
++                }
++                i++;
++            }
++        }
++        tlen = i - start;
++        twin = tfs_bridge_arg(s + start, (size_t)tlen);
++        if (twin != NULL) {
++            tfs_bridge_cat_quoted(out, twin);
++            free(twin);
++            dirty = 1;
++        }
++        else {
++            rb_str_buf_cat(out, s + start, (size_t)tlen);
++        }
++    }
++    if (dirty) *strp = out;
++    RB_GC_GUARD(out);
++}
++
 +/* Spawn of a memfs-resident binary: materialize the exec target to the
 +   host cache, point command_abspath at it (the child execve()s
 +   command_abspath; command_name follows for error reporting), and put
 +   the preload shim + the current mounts into the child's environment so
-+   its own IO resolves through the VFS.  Shell-form spawns and bare
-+   command names (PATH search) do not resolve through the VFS — spawn
-+   with an absolute in-VFS path. */
++   its own IO resolves through the VFS.  Shell-form spawns bridge their
++   in-VFS argument TOKENS parent-side (above) — the shell itself stays
++   the host's — and bare command names (PATH search) do not resolve
++   through the VFS, but a bare name the app payload EXPOSES as a
++   spawned runtime (spec 30 §2) plans into a full child boot FIRST,
++   below. */
 +static void
 +tfs_spawn_prepare(struct rb_execarg *eargp)
 +{
@@ -223,18 +451,48 @@ index 97fa336..f55697e 100644
 +    char *preload;
 +    char *mounts;
 +
++    /* Shell form (all POSIX): bridge the argument tokens, keep the
++       host's shell. The darwin scrub is unchanged (tebako#448's
++       /bin/sh rule — the shell is always a restricted target). */
++    if (eargp->use_shell) {
++        tfs_bridge_cmdline(&eargp->invoke.sh.shell_script);
 +#if defined(__APPLE__)
-+    /* The scrub first: a restricted target dies under the inherited
-+       variable at exec, before the VFS flow below could matter. */
++        if (tfs_spawn_target_restricted(eargp)) {
++            tfs_env_unset(eargp, "DYLD_INSERT_LIBRARIES");
++        }
++#endif
++        return;
++    }
++
++    if (!RB_TYPE_P(eargp->invoke.cmd.command_name, T_STRING)) return;
++    prog = RSTRING_PTR(eargp->invoke.cmd.command_name);
++    if (prog == NULL) return;
++
++    /* The plan head runs BEFORE the platform scrub and the VFS flow:
++       a planned bare name retargets to the store's runtime exe, and a
++       named error must never fall through to a host binary of the same
++       name (spec 30 §2). */
++    {
++        VALUE buf = eargp->invoke.cmd.argv_buf;
++        const char *args = NULL;
++        size_t args_len = 0;
++        if (RB_TYPE_P(buf, T_STRING)) {
++            args = RSTRING_PTR(buf);
++            args_len = (size_t)RSTRING_LEN(buf);
++        }
++        if (tfs_spawn_plan_head(eargp, prog, args, args_len)) return;
++    }
++
++#if defined(__APPLE__)
++    /* The scrub: a restricted target dies under the inherited variable
++       at exec, before the VFS flow below could matter. */
 +    if (tfs_spawn_target_restricted(eargp)) {
 +        tfs_env_unset(eargp, "DYLD_INSERT_LIBRARIES");
 +        return;
 +    }
 +#endif
 +
-+    if (eargp->use_shell || !RB_TYPE_P(eargp->invoke.cmd.command_name, T_STRING)) return;
-+    prog = RSTRING_PTR(eargp->invoke.cmd.command_name);
-+    if (prog == NULL || !tebako_path_is_embedded(prog)) return;
++    if (!tebako_path_is_embedded(prog)) return;
 +    mapped = tebako_fs_exec_materialize(prog);
 +    if (mapped == NULL) return;  /* covered but not held: a host path — exec answers honestly */
 +    eargp->invoke.cmd.command_name = rb_str_new_cstr(mapped);
@@ -301,7 +559,11 @@ index 97fa336..f55697e 100644
 +   rb_exec_fillarg built them. Non-embedded tokens pass through
 +   byte-identical; a covered path the mounts do not hold keeps its
 +   spelling — the child answers honestly (the exec-target hook's own
-+   pass-through discipline). */
++   pass-through discipline). A bare name the app payload EXPOSES as a
++   spawned runtime plans FIRST (spec 30 §2's head — windows has no
++   launcher tier, spec 30 §3): array form applies the plan to the
++   exec pair and argv; shell form splices the planned boot into the
++   string inline. */
 +
 +/* Probe one token: a malloc'd host twin when the token names a mounted
 +   path, NULL otherwise. One wrapping layer of double quotes is stripped
@@ -330,20 +592,14 @@ index 97fa336..f55697e 100644
 +    return mapped;  /* NULL: covered but not held — pass through */
 +}
 +
-+/* Shell form: rewrite the command line when any token bridges. Token
-+   boundaries are unquoted blanks; the separators are copied as they
-+   are, so an all-host command line stays byte-identical. */
-+static void
-+tfs_bridge_cmdline(VALUE *strp)
++/* Tokenize s[i..slen) on unquoted blanks honoring double-quoted
++   regions, appending each token (bridged when embedded) and the
++   verbatim separators to out; sets *dirtyp when any token bridged.
++   The separators copy as they are, so an all-host range stays
++   byte-identical. */
++static long
++tfs_bridge_span(VALUE out, const char *s, long i, long slen, int *dirtyp)
 +{
-+    const char *s;
-+    long slen, i = 0;
-+    int dirty = 0;
-+    VALUE out;
-+    if (!RB_TYPE_P(*strp, T_STRING)) return;
-+    s = RSTRING_PTR(*strp);
-+    slen = RSTRING_LEN(*strp);
-+    out = rb_str_buf_new(slen + 32);
 +    while (i < slen) {
 +        long start, tlen;
 +        char *twin;
@@ -371,13 +627,125 @@ index 97fa336..f55697e 100644
 +            rb_str_buf_cat(out, twin, strlen(twin));
 +            rb_str_buf_cat(out, "\"", 1);
 +            free(twin);
-+            dirty = 1;
++            *dirtyp = 1;
 +        }
 +        else {
 +            rb_str_buf_cat(out, s + start, (size_t)tlen);
 +        }
 +    }
++    return i;
++}
++
++/* Shell form: rewrite the command line when any token bridges. */
++static void
++tfs_bridge_cmdline(VALUE *strp)
++{
++    const char *s;
++    long slen;
++    int dirty = 0;
++    VALUE out;
++    if (!RB_TYPE_P(*strp, T_STRING)) return;
++    s = RSTRING_PTR(*strp);
++    slen = RSTRING_LEN(*strp);
++    out = rb_str_buf_new(slen + 32);
++    tfs_bridge_span(out, s, 0, slen, &dirty);
 +    if (dirty) *strp = out;
++    RB_GC_GUARD(out);
++}
++
++/* The windows shell form IS the spawn surface (spec 30 §3: no
++   launcher tier): when the command token — the first token, one
++   quote layer stripped — names an EXPOSED command, plan it (no
++   known arguments, the launcher tier's own behavior) and splice the
++   planned boot into the string: the quoted store exe + the plan's
++   argv tokens + the remaining tokens bridged, with the separators
++   and any trailing redirections preserved for cmd. The plan's env
++   ops apply through env_modification. An unexposed command takes
++   the plain bridging path. */
++static void
++tfs_bridge_shell_planned(struct rb_execarg *eargp)
++{
++    VALUE *strp = &eargp->invoke.sh.shell_script;
++    const char *s;
++    long slen, b, i, start, tlen;
++    char *cmd;
++    VALUE out;
++    char *exe = NULL;
++    char *argv = NULL;
++    char *env = NULL;
++    char *err = NULL;
++    size_t argv_len = 0, env_len = 0;
++    int rc, dirty = 0;
++
++    if (!RB_TYPE_P(*strp, T_STRING)) return;
++    s = RSTRING_PTR(*strp);
++    slen = RSTRING_LEN(*strp);
++
++    /* The command token's span: leading blanks, then one quote-aware
++       run. */
++    b = 0;
++    while (b < slen && (s[b] == ' ' || s[b] == '\t')) b++;
++    if (b >= slen) return;
++    i = b;
++    {
++        int inq = 0;
++        while (i < slen) {
++            char c = s[i];
++            if (c == '"')
++                inq = !inq;
++            else if ((c == ' ' || c == '\t') && !inq)
++                break;
++            i++;
++        }
++    }
++    start = b;
++    tlen = i - start;
++    if (tlen >= 2 && s[start] == '"' && s[start + tlen - 1] == '"') {
++        start++;
++        tlen -= 2;
++    }
++    if (tlen == 0) return;
++    cmd = (char *)malloc(tlen + 1);
++    if (cmd == NULL) return;
++    memcpy(cmd, s + start, tlen);
++    cmd[tlen] = '\0';
++    rc = tebako_spawn_runtime_plan(cmd, NULL, 0, &exe, &argv, &argv_len,
++                                   &env, &env_len, &err);
++    free(cmd);
++    if (rc < 0) {
++        VALUE msg = rb_str_new_cstr(err != NULL ? err
++                                    : "spawn plan failed without a message");
++        free(err);
++        rb_exc_raise(rb_exc_new_str(rb_eRuntimeError, msg));
++    }
++    if (rc != 1) {
++        tfs_bridge_cmdline(strp);
++        return;
++    }
++
++    out = rb_str_buf_new(slen + (long)argv_len + 32);
++    rb_str_buf_cat(out, s, b);            /* the leading blanks */
++    /* the store exe, quoted: its path may carry blanks */
++    rb_str_buf_cat(out, "\"", 1);
++    rb_str_buf_cat(out, exe, strlen(exe));
++    rb_str_buf_cat(out, "\"", 1);
++    {
++        const char *p = argv;
++        const char *ep = argv + argv_len;
++        if (p < ep) p += strlen(p) + 1;   /* argv[0] is the exe */
++        while (p < ep) {
++            size_t t = strlen(p);
++            rb_str_buf_cat(out, " ", 1);
++            rb_str_buf_cat(out, p, (long)t);
++            p += t + 1;
++        }
++    }
++    tfs_bridge_span(out, s, i, slen, &dirty);  /* the remaining tokens */
++    if (env != NULL && env_len > 0) tfs_spawn_env_ops(eargp, env, env_len);
++    free(exe);
++    free(argv);
++    free(env);
++    *strp = out;
 +    RB_GC_GUARD(out);
 +}
 +
@@ -434,15 +802,28 @@ index 97fa336..f55697e 100644
 +static void
 +tfs_spawn_prepare(struct rb_execarg *eargp)
 +{
++    /* Shell form: the exposed-command plan inline (spec 30 §3 —
++       windows has no launcher tier), the plain token bridge
++       otherwise. */
 +    if (eargp->use_shell) {
-+        tfs_bridge_cmdline(&eargp->invoke.sh.shell_script);
++        tfs_bridge_shell_planned(eargp);
 +        return;
 +    }
-+    /* Array form: an absolute in-VFS exec TARGET materializes by the
-+       same rule the POSIX hook applies (a bare name resolves host-side
-+       through the driver's PATH prepend and is never embedded). */
++    /* Array form: a bare name the app payload EXPOSES as a spawned
++       runtime plans into the full child boot FIRST (spec 30 §2). A
++       pass-through's absolute in-VFS exec TARGET then materializes
++       by the POSIX hook's own rule, and the remaining argument
++       tokens bridge below. */
 +    if (RB_TYPE_P(eargp->invoke.cmd.command_name, T_STRING)) {
++        VALUE buf = eargp->invoke.cmd.argv_buf;
 +        const char *prog = RSTRING_PTR(eargp->invoke.cmd.command_name);
++        const char *args = NULL;
++        size_t args_len = 0;
++        if (RB_TYPE_P(buf, T_STRING)) {
++            args = RSTRING_PTR(buf);
++            args_len = (size_t)RSTRING_LEN(buf);
++        }
++        if (tfs_spawn_plan_head(eargp, prog, args, args_len)) return;
 +        if (tebako_path_is_embedded(prog)) {
 +            char *mapped = tebako_fs_exec_materialize(prog);
 +            if (mapped != NULL) {
@@ -460,7 +841,7 @@ index 97fa336..f55697e 100644
  static VALUE
  rb_execarg_init(int argc, const VALUE *orig_argv, int accept_shell, VALUE execarg_obj)
  {
-@@ -2846,6 +3080,9 @@ rb_execarg_init(int argc, const VALUE *orig_argv, int accept_shell, VALUE execar
+@@ -2846,6 +3221,9 @@ rb_execarg_init(int argc, const VALUE *orig_argv, int accept_shell, VALUE execar
      prog = rb_exec_getargs(&argc, &argv, accept_shell, &env, &opthash);
      rb_exec_fillarg(prog, argc, argv, env, opthash, execarg_obj);
      ALLOCV_END(argv_buf);
