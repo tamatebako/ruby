@@ -49,6 +49,9 @@ patches:
   - feature: openssl_extconf_ruby_export_msys
     file: openssl_extconf_ruby_export_msys_6.patch
     version: "6"
+  - feature: openssl_extconf_ruby_export_msys
+    file: openssl_extconf_ruby_export_msys_6.patch
+    version: "7"
   # clang (and cl.exe) reject digest.h's plain extern against digest.c's
   # dllexport definition under --with-static-linked-ext; upstream's macro
   # fix, carried for every 4.0.x (unshipped upstream, ruby/ruby d0e0f2af)
