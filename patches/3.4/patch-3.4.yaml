@@ -32,6 +32,11 @@ patches:
   - feature: openssl_extconf_ruby_export_msys
     file: openssl_extconf_ruby_export_msys_10.patch
     version: "10"
+  # clang (and cl.exe) reject digest.h's plain extern against digest.c's
+  # dllexport definition under --with-static-linked-ext; upstream's macro
+  # fix, carried for every 3.4.x (unshipped upstream, ruby/ruby d0e0f2af)
+  - feature: digest_h_wrap_metadata_linkage_msys
+    file: digest_h_wrap_metadata_linkage_msys.patch
   - feature: rubygems_openssl_require
     file: ../3.1/rubygems_openssl_require.patch
   - feature: thread_pthread_main_stack_musl

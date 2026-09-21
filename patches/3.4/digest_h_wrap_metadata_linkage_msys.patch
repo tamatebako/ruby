@@ -1,0 +1,63 @@
+# digest_h_wrap_metadata_linkage_msys.patch
+#
+# Target:  ext/digest/digest.c, ext/digest/digest.h (pass2 (msys))
+# Source:  upstream ruby/ruby d0e0f2af (ruby/digest 7f72a1eb) — in no
+#          shipped release (not 4.0.7, not the ruby_3_4 branch tip)
+#
+# --with-static-linked-ext on a mingw CLANG (clangarm64) hard-errors:
+#   digest.c:547:1: error: redeclaration of 'rb_digest_wrap_metadata'
+#   cannot add 'dllexport' attribute
+# digest.h's EXTSTATIC inline declares the function plain extern while
+# digest.c defines it RUBY_FUNC_EXPORTED (dllexport under -fdeclspec);
+# GCC accepts the mismatch, clang rejects it (as does cl.exe, C2375).
+# The upstream fix carries the linkage on a shared macro so declaration
+# and definition always match. Harmless on GCC and on POSIX (the macro
+# defaults to plain extern).
+diff --git a/ext/digest/digest.c b/ext/digest/digest.c
+index 28f60227548400..f0f0910de6421b 100644
+--- a/ext/digest/digest.c
++++ b/ext/digest/digest.c
+@@ -13,6 +13,7 @@
+ 
+ ************************************************/
+ 
++#define RB_DIGEST_WRAP_METADATA_LINKAGE RUBY_FUNC_EXPORTED
+ #include "digest.h"
+ 
+ static VALUE rb_mDigest;
+@@ -543,7 +544,7 @@ static const rb_data_type_t metadata_type = {
+     {0},
+ };
+ 
+-RUBY_FUNC_EXPORTED VALUE
++RB_DIGEST_WRAP_METADATA_LINKAGE VALUE
+ rb_digest_wrap_metadata(const rb_digest_metadata_t *meta)
+ {
+     return rb_obj_freeze(TypedData_Wrap_Struct(0, &metadata_type, (void *)meta));
+diff --git a/ext/digest/digest.h b/ext/digest/digest.h
+index c5c37583a6e7c9..0ad8df60b93780 100644
+--- a/ext/digest/digest.h
++++ b/ext/digest/digest.h
+@@ -73,13 +73,21 @@ rb_id_metadata(void)
+ # define DIGEST_USE_RB_EXT_RESOLVE_SYMBOL 1
+ #endif
+ 
++/* Declarations and definitions of the same function must carry the same
++ * attribute on MSVC, and digest.c has to export the definition so that
++ * statically linked extensions can find the symbol in libruby. */
++#ifndef RB_DIGEST_WRAP_METADATA_LINKAGE
++# define RB_DIGEST_WRAP_METADATA_LINKAGE extern
++#endif
++
+ static inline VALUE
+ rb_digest_make_metadata(const rb_digest_metadata_t *meta)
+ {
+ #if defined(EXTSTATIC) && EXTSTATIC
+     /* The extension is built as a static library, so safe to refer to
+      * rb_digest_wrap_metadata directly. */
+-    extern VALUE rb_digest_wrap_metadata(const rb_digest_metadata_t *meta);
++    RB_DIGEST_WRAP_METADATA_LINKAGE
++    VALUE rb_digest_wrap_metadata(const rb_digest_metadata_t *meta);
+     return rb_digest_wrap_metadata(meta);
+ #else
+     /* The extension is built as a shared library, so we can't refer
