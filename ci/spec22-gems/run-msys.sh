@@ -23,19 +23,23 @@
 #
 # Required env:
 #   RUNTIME_PKG_DIR — the factory runtime-packages artifact extracted
-#                     (holds tebako-runtime-*-windows-ucrt64[.exe],
+#                     (holds tebako-runtime-*-windows-<triplet>[.exe],
 #                     the uniquely-named .dll, the .tfs env image)
 #   DEVKIT_DIR      — the factory devkit artifact extracted
 #                     (include/ = the stash headers the env image omits,
-#                     lib/libx64-ucrt-ruby<ABI>.dll.a = the import library
-#                     an msys native extension links against)
-#   TFS_CLI         — the published windows tfs.exe (press + extract)
+#                     lib/lib<cpu-tag>-ucrt-ruby<ABI>.dll.a = the import
+#                     library an msys native extension links against)
+#   TFS_CLI         — the published windows tfs.exe (press + extract);
+#                     tebako v2.8.16 floor — the arm64 leg's env image is
+#                     limnifs, which pre-spec-20 CLIs cannot open
 # Overridable:
 #   SCRATCH     (default: /tmp/spec22-gems-msys-scratch-<version>;
 #               POSIX spelling — it rides the conv_envvars below)
-#   UCRT64_BIN  (default: /d/a/_temp/msys64/ucrt64/bin — the
-#               setup-msys2 location; the gem-install leg's PATH source
-#               for gcc/make, exactly what the factory builds with;
+#   UCRT64_BIN  (default: /d/a/_temp/msys64/<toolchain>/bin — the
+#               setup-msys2 location, toolchain per the arch detected
+#               below: ucrt64 on x64, clangarm64 on arm64; the
+#               gem-install leg's PATH source for gcc/make, exactly what
+#               the factory builds with;
 #               POSIX spelling — it rides PATH, a conv_envvar)
 #
 # Path discipline: the runtime exe, tfs.exe, and cmd.exe are NATIVE
@@ -107,7 +111,6 @@ RUNTIME_PKG_DIR="${RUNTIME_PKG_DIR:?run-msys.sh: RUNTIME_PKG_DIR (the factory ru
 DEVKIT_DIR="${DEVKIT_DIR:?run-msys.sh: DEVKIT_DIR (the factory devkit artifact dir) is required}"
 TFS_CLI="${TFS_CLI:?run-msys.sh: TFS_CLI (the published windows tfs.exe) is required}"
 SCRATCH="${SCRATCH:-/tmp/spec22-gems-msys-scratch-$VERSION}"
-UCRT64_BIN="${UCRT64_BIN:-/d/a/_temp/msys64/ucrt64/bin}"
 
 case "$(uname -s)" in
   MINGW*|MSYS*) ;;
@@ -127,28 +130,43 @@ die()  { echo "FAIL spec22-gems-msys ($*)" >&2; exit 1; }
 # POSIX, see the header comment.
 w()    { cygpath -m "$1"; }
 
+# The windows architecture is read off the runtime package's triplet
+# suffix — the artifact name is the contract the factory's env-matrix
+# arch key stamps: -windows-ucrt64 = x64 (ucrt64 toolchain),
+# -windows-ucrt-arm64 = aarch64 (clangarm64). The cpu tag mirrors the
+# factory's RubyVersion::MSYS_DLL_CPU_TAGS (a bash harness cannot flow
+# it — a drifted tag binds nothing: the PE import and the import
+# library both name it, so drift dies loudly at boot / link).
+pkg_stem="$(find "$RUNTIME_PKG_DIR" -maxdepth 2 \( -name 'tebako-runtime-*-windows-ucrt64' -o -name 'tebako-runtime-*-windows-ucrt-arm64' \) | head -1)"
+case "$pkg_stem" in
+  *-windows-ucrt-arm64) CPU_TAG=aarch64; MSYS_TOOLCHAIN=clangarm64 ;;
+  *-windows-ucrt64)     CPU_TAG=x64;     MSYS_TOOLCHAIN=ucrt64 ;;
+  *) die "no arch-readable runtime exe under $RUNTIME_PKG_DIR (tebako-runtime-*-windows-ucrt64|windows-ucrt-arm64 expected)" ;;
+esac
+UCRT64_BIN="${UCRT64_BIN:-/d/a/_temp/msys64/$MSYS_TOOLCHAIN/bin}"
+
 [ -x "$TFS_CLI" ] || [ -f "$TFS_CLI" ] || die "tfs CLI not at $TFS_CLI (download the tebako release's windows tfs.exe)"
 
-# x64-ucrt-ruby<ABI>.dll — ruby configure's RUBY_SO_NAME for
-# x86_64-w64-mingw32; <ABI> = <MAJOR><MINOR>0 (factory RubyVersion#msys_dll_name
-# is the name's owner; mirrored here because a bash harness cannot flow it).
+# <cpu-tag>-ucrt-ruby<ABI>.dll — ruby configure's RUBY_SO_NAME for a
+# mingw host (x64 on x86_64, aarch64 on arm64 — the detection above);
+# <ABI> = <MAJOR><MINOR>0 (factory RubyVersion#msys_dll_name is the
+# name's owner; mirrored here because a bash harness cannot flow it).
 ABI="$(echo "$VERSION" | awk -F. '{printf "%d%d0", $1, $2}')"
-PE_DLL="x64-ucrt-ruby${ABI}.dll"
+PE_DLL="${CPU_TAG}-ucrt-ruby${ABI}.dll"
 
 mkdir -p "$SCRATCH"/{tmp,home,tebako-home}
 export TMPDIR="$SCRATCH/tmp"
 
 # --- 1. stage the runtime dir (exe + PE-named DLL + env image) -----------
 # The artifact carries the DLL under the unique package name; the exe's
-# PE imports resolve it only as x64-ucrt-ruby<ABI>.dll next to the exe
-# (the consumer materializes the copy — the factory boot smoke's
+# PE imports resolve it only as <cpu-tag>-ucrt-ruby<ABI>.dll next to the
+# exe (the consumer materializes the copy — the factory boot smoke's
 # materialize_ruby_dll is the mirrored rule).
 RUNTIME_DIR="$SCRATCH/runtime"
 if [ ! -f "$RUNTIME_DIR/.staged-$VERSION" ]; then
   step "stage runtime package from $RUNTIME_PKG_DIR"
   rm -rf "$RUNTIME_DIR"; mkdir -p "$RUNTIME_DIR"
-  exe="$(find "$RUNTIME_PKG_DIR" -maxdepth 2 -name 'tebako-runtime-*-windows-*' ! -name '*.dll' ! -name '*.tfs' ! -name '*.json' | head -1)"
-  [ -n "$exe" ] || die "no runtime exe under $RUNTIME_PKG_DIR"
+  exe="$pkg_stem"
   pkg="${exe%.exe}"
   [ -f "$pkg.dll" ] || die "no package DLL at $pkg.dll"
   [ -f "$pkg.tfs" ] || die "no env image at $pkg.tfs"
@@ -198,7 +216,7 @@ if [ ! -f "$ENV_HOST/.bridge-$VERSION" ]; then
   mkdir -p "$ENV_HOST/bin" "$ENV_HOST/lib"
   "$TFS_CLI" extract -q -d "$(w "$ENV_HOST")" "$(w "$RUNTIME_IMAGE")"
   [ -d "$DEVKIT_DIR/include" ] || die "devkit include/ missing under $DEVKIT_DIR"
-  imp="$(find "$DEVKIT_DIR/lib" -name 'libx64-ucrt-ruby*.dll.a' | head -1)"
+  imp="$(find "$DEVKIT_DIR/lib" -name "lib${CPU_TAG}-ucrt-ruby*.dll.a" | head -1)"
   [ -n "$imp" ] || die "devkit import library missing under $DEVKIT_DIR/lib"
   cp -R "$DEVKIT_DIR/include" "$ENV_HOST/include"
   cp "$imp" "$ENV_HOST/lib/"
