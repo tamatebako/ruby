@@ -53,6 +53,12 @@ jobs:
         uses: peter-evans/create-pull-request@v7
         with:
           branch: onboard/ruby-${{ matrix.version }}
+          # The onboarding surface is exactly the version catalog plus the
+          # patch tree — never the runner's .bundle/config (bundler-cache
+          # writes one) or the monitor-result.json run artifact.
+          add-paths: |
+            versions.yml
+            patches/
           title: "Onboard ruby ${{ matrix.version }}"
           commit-message: "Onboard ruby ${{ matrix.version }} (release monitor)"
           body: |
