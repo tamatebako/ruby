@@ -145,6 +145,17 @@ case "$pkg_stem" in
 esac
 UCRT64_BIN="${UCRT64_BIN:-/d/a/_temp/msys64/$MSYS_TOOLCHAIN/bin}"
 
+# The probe images press in the format the leg's own driver mounts:
+# dwarfs on x64 (the x64 env image's format), limnifs on arm64 — the
+# arm64 link unit is limnifs-only (clangarm64 has no native dwarfs-t),
+# so its driver never mounts dwarfs bytes and the tfs CLI fails a
+# dwarfs press there by name ("mkimage --format dwarfs is not available
+# on windows-arm64").
+case "$MSYS_TOOLCHAIN" in
+  clangarm64) PRESS_FORMAT=limnifs ;;
+  *)          PRESS_FORMAT=dwarfs ;;
+esac
+
 [ -x "$TFS_CLI" ] || [ -f "$TFS_CLI" ] || die "tfs CLI not at $TFS_CLI (download the tebako release's windows tfs.exe)"
 
 # <cpu-tag>-ucrt-ruby<ABI>.dll — ruby configure's RUBY_SO_NAME for a
@@ -239,7 +250,7 @@ if [ ! -f "$SETUP_IMG" ] || [ "$SELF_DIR/fixtures/gem.rb" -nt "$SETUP_IMG" ] \
   cp "$SELF_DIR/fixtures/gem.rb" "$SCRATCH/setup-tree/setup/"
   cp "$SELF_DIR/fixtures/envprobe.rb" "$SCRATCH/setup-tree/setup/"
   cp "$SELF_DIR/fixtures/pipeprobe.rb" "$SCRATCH/setup-tree/setup/"
-  "$TFS_CLI" mkimage --format dwarfs "$(w "$SCRATCH/setup-tree")" --output "$(w "$SETUP_IMG")" >/dev/null
+  "$TFS_CLI" mkimage --format "$PRESS_FORMAT" "$(w "$SCRATCH/setup-tree")" --output "$(w "$SETUP_IMG")" >/dev/null
 fi
 
 # --- 3.5 env diagnostic: Etc.sysconfdir under scrubbed envs -------------
@@ -494,11 +505,11 @@ if [ ! -f "$PAYLOAD_IMG" ] || [ ! -f "$PAYLOAD_IMG_NOMAT" ] \
   cp "$SELF_DIR/fixtures/payload-manifest.yaml" "$PROBE_TREE/__tpkg__/manifest.yaml"
   stamp_library_aliases "$PROBE_TREE/__tpkg__/manifest.yaml"
   rm -f "$PAYLOAD_IMG"
-  "$TFS_CLI" mkimage --format dwarfs "$(w "$PROBE_TREE")" --output "$(w "$PAYLOAD_IMG")" >/dev/null
+  "$TFS_CLI" mkimage --format "$PRESS_FORMAT" "$(w "$PROBE_TREE")" --output "$(w "$PAYLOAD_IMG")" >/dev/null
   cp "$SELF_DIR/fixtures/payload-manifest-unmaterialized.yaml" "$PROBE_TREE/__tpkg__/manifest.yaml"
   stamp_library_aliases "$PROBE_TREE/__tpkg__/manifest.yaml"
   rm -f "$PAYLOAD_IMG_NOMAT"
-  "$TFS_CLI" mkimage --format dwarfs "$(w "$PROBE_TREE")" --output "$(w "$PAYLOAD_IMG_NOMAT")" >/dev/null
+  "$TFS_CLI" mkimage --format "$PRESS_FORMAT" "$(w "$PROBE_TREE")" --output "$(w "$PAYLOAD_IMG_NOMAT")" >/dev/null
   "$TFS_CLI" cat "$(w "$PAYLOAD_IMG")" /__tpkg__/manifest.yaml | grep -q "^materialize:" \
     || die "the pressed image lost the materialize: key (spec 22 §4)"
   "$TFS_CLI" cat "$(w "$PAYLOAD_IMG_NOMAT")" /__tpkg__/manifest.yaml | grep -q "^materialize:" \
