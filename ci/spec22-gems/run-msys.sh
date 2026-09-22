@@ -35,9 +35,9 @@
 # Overridable:
 #   SCRATCH     (default: /tmp/spec22-gems-msys-scratch-<version>;
 #               POSIX spelling — it rides the conv_envvars below)
-#   UCRT64_BIN  (default: /d/a/_temp/msys64/<toolchain>/bin — the
-#               setup-msys2 location, toolchain per the arch detected
-#               below: ucrt64 on x64, clangarm64 on arm64; the
+#   UCRT64_BIN  (default: /<toolchain>/bin — POSIX spelling off the
+#               msys2 install-root mount, toolchain per the arch
+#               detected below: ucrt64 on x64, clangarm64 on arm64; the
 #               gem-install leg's PATH source for gcc/make, exactly what
 #               the factory builds with;
 #               POSIX spelling — it rides PATH, a conv_envvar)
@@ -143,7 +143,11 @@ case "$pkg_stem" in
   *-windows-ucrt64)     CPU_TAG=x64;     MSYS_TOOLCHAIN=ucrt64 ;;
   *) die "no arch-readable runtime exe under $RUNTIME_PKG_DIR (tebako-runtime-*-windows-ucrt64|windows-ucrt-arm64 expected)" ;;
 esac
-UCRT64_BIN="${UCRT64_BIN:-/d/a/_temp/msys64/$MSYS_TOOLCHAIN/bin}"
+# POSIX spelling — the msys2 shell mounts its install root at /, so
+# /<toolchain>/bin resolves on any runner drive layout (the absolute
+# /d/a/_temp/msys64 spelling broke on windows-11-arm, whose workspace
+# and toolcache live on C: — the third arm64 dogfood's clang++ ENOENT).
+UCRT64_BIN="${UCRT64_BIN:-/$MSYS_TOOLCHAIN/bin}"
 
 # The probe images press in the format the leg's own driver mounts:
 # dwarfs on x64 (the x64 env image's format), limnifs on arm64 — the
