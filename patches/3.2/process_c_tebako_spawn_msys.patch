@@ -22,7 +22,7 @@ diff --git a/process.c b/process.c
 index 97fa336..f55697e 100644
 --- a/process.c
 +++ b/process.c
-@@ -2834,6 +2834,818 @@ rb_execarg_get(VALUE execarg_obj)
+@@ -2834,6 +2834,854 @@ rb_execarg_get(VALUE execarg_obj)
      return eargp;
  }
  
@@ -479,6 +479,24 @@ index 97fa336..f55697e 100644
 +        if (RB_TYPE_P(buf, T_STRING)) {
 +            args = RSTRING_PTR(buf);
 +            args_len = (size_t)RSTRING_LEN(buf);
++            /* argv_buf's first token is the child argv[0]
++               (rb_exec_fillarg packs the full argv); the plan supplies
++               the entry name itself (--tebako-entry), so offer only the
++               user arguments — else the spawned runtime receives the
++               program name as its first argument (tamatebako/tebako#669).
++               A custom argv0 (the [cmd, name] form) is likewise never a
++               user argument. */
++            if (args_len > 0) {
++                size_t head = strlen(args) + 1;
++                if (head < args_len) {
++                    args += head;
++                    args_len -= head;
++                }
++                else {
++                    args = NULL;
++                    args_len = 0;
++                }
++            }
 +        }
 +        if (tfs_spawn_plan_head(eargp, prog, args, args_len)) return;
 +    }
@@ -822,6 +840,24 @@ index 97fa336..f55697e 100644
 +        if (RB_TYPE_P(buf, T_STRING)) {
 +            args = RSTRING_PTR(buf);
 +            args_len = (size_t)RSTRING_LEN(buf);
++            /* argv_buf's first token is the child argv[0]
++               (rb_exec_fillarg packs the full argv); the plan supplies
++               the entry name itself (--tebako-entry), so offer only the
++               user arguments — else the spawned runtime receives the
++               program name as its first argument (tamatebako/tebako#669).
++               A custom argv0 (the [cmd, name] form) is likewise never a
++               user argument. */
++            if (args_len > 0) {
++                size_t head = strlen(args) + 1;
++                if (head < args_len) {
++                    args += head;
++                    args_len -= head;
++                }
++                else {
++                    args = NULL;
++                    args_len = 0;
++                }
++            }
 +        }
 +        if (tfs_spawn_plan_head(eargp, prog, args, args_len)) return;
 +        if (tebako_path_is_embedded(prog)) {
