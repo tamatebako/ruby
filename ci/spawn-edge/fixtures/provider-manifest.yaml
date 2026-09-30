@@ -1,0 +1,35 @@
+# Payload manifest for the spawn-edge PROVIDER image (spec 03), pressed to
+# /__tpkg__/manifest.yaml by run.sh / run-msys.sh. The digest placeholders
+# are stamped by mkimage at press time (spec 03 §7 fixed-point rule: the
+# tree hash excludes /__tpkg__/; blob_sha256 stays as authored — advisory
+# producer provenance, never a verification input for an embedded
+# manifest).
+#
+# The provider is the spawn TARGET: its single entrypoint carries a
+# runtime_requirement (spec 32 §1 — a runtime-less entry has no spawn
+# form), and the driver's plan reads this declaration from the store
+# manifest mirror (spec 32 §2, locked — run.sh installs exactly the
+# pressed, stamped copy as the mirror).
+identity:
+  schema_version: 1
+  kind: app
+  name: spawn-edge-provider
+  version: "1.0.0"
+  producer: {tool: spawn-edge, tool_version: "1"}
+  created: "2026-09-30T00:00:00Z"
+  digest:
+    tree_hash: "sha256:0000000000000000000000000000000000000000000000000000000000000000"
+    blob_sha256: "0000000000000000000000000000000000000000000000000000000000000000"
+  signing: {state: unsigned}
+  encryption: {state: none}
+provides:
+  entrypoints:
+    - name: spawn-edge-echo
+      path: /spawn-edge-echo.rb
+      # The whole ruby catalog: the gate runs per ruby line, and the
+      # child's runtime resolves cache-only against this constraint.
+      runtime_requirement: {engine: ruby, constraint: ">= 3.1, < 5.0"}
+  # Pressed per leg and never distributed; the platform axis is not what
+  # this acceptance exercises.
+  platforms: universal
+  capabilities: {exec: true, read: true}
