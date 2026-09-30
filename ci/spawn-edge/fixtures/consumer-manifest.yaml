@@ -1,0 +1,42 @@
+# Payload manifest for the spawn-edge CONSUMER image (spec 03), pressed to
+# /__tpkg__/manifest.yaml by run.sh / run-msys.sh. The digest placeholders
+# are stamped by mkimage at press time (spec 03 §7 fixed-point rule).
+#
+# The consumer carries the edge under test (spec 32 §1, schema_minor 5):
+# a `kind: executable` requirement whose `expose:` list opens the SPAWN
+# surface — a bare-name spawn of `spawn-edge-echo` from the probe is
+# planned as the provider payload's own spec-17 dispatch in a child
+# process. `payload:` pins the provider by name (the store holds exactly
+# one candidate, but the pin keeps the edge unambiguous by construction);
+# `critical: true` is the producer obligation — a reader predating
+# schema_minor 5 must refuse the edge, never skip it silently. The edge
+# declares no `mount:` — the provider's VFS surface stays out of the
+# parent (spawn-only, the shape the metanorma→xml2rfc edge ships).
+identity:
+  schema_version: 1
+  kind: app
+  name: spawn-edge-consumer
+  version: "1.0.0"
+  producer: {tool: spawn-edge, tool_version: "1"}
+  created: "2026-09-30T00:00:00Z"
+  digest:
+    tree_hash: "sha256:0000000000000000000000000000000000000000000000000000000000000000"
+    blob_sha256: "0000000000000000000000000000000000000000000000000000000000000000"
+  signing: {state: unsigned}
+  encryption: {state: none}
+provides:
+  entrypoints:
+    - name: spawn-edge-probe
+      path: /spawn-edge-probe.rb
+      # Declarative only — the harness execs the leg's runtime directly;
+      # nothing resolves through this constraint.
+      runtime_requirement: {engine: ruby, constraint: ">= 3.1, < 5.0"}
+  platforms: universal
+  capabilities: {exec: true, read: true}
+requires:
+  - kind: executable
+    name: spawn-edge-echo
+    payload: spawn-edge-provider
+    constraint: ">= 1.0"
+    expose: [spawn-edge-echo]
+    critical: true
