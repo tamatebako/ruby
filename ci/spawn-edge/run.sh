@@ -31,8 +31,9 @@
 # Usage: ci/spawn-edge/run.sh
 #
 # Required env:
-#   RUNTIME_PKG_DIR — the leg's runtime-packages dir (one
-#                     tebako-runtime-<tv>-<lv>-<triplet>[.exe] + its .tfs)
+#   RUNTIME_PKG_DIR — the leg's runtime-packages dir (the leg's exe +
+#                     env image: tebako-runtime-<tv>-ruby-<lv>-<triplet>
+#                     new-era, tebako-runtime-<tv>-<lv>-<triplet> legacy)
 #   RUBY_VERSION    — the leg's ruby version (e.g. 4.0.7)
 #   TEBAKO_VERSION  — the leg's tebako version (e.g. 0.16.33)
 #   TFS_CLI         — the leg's pin-verified tfs CLI (press + readback)
@@ -69,11 +70,21 @@ sha256_file() {
 }
 
 # --- 0. the leg's artifacts -------------------------------------------------
-PKG_BASE="tebako-runtime-$TEBAKO_VERSION-$RUBY_VERSION"
-exe="$(find "$RUNTIME_PKG_DIR" -maxdepth 1 -name "$PKG_BASE-*" \
-        ! -name "*.tfs" ! -name "*.sha256" ! -name "*.origin" ! -name "*.abi" \
-        ! -name "*.dll" ! -name "*.yaml" ! -name "*.json" | head -1)"
-[ -n "$exe" ] || die "no runtime exe $PKG_BASE-* under $RUNTIME_PKG_DIR"
+# tebako#716 era law: publishes at TEBAKO_VERSION >= the factory's era floor
+# carry the language segment (tebako-runtime-<tv>-ruby-<lv>-<triplet>); older
+# lines keep the legacy grammar (tebako-runtime-<tv>-<lv>-<triplet>). The same
+# harness serves both — reruns of old tags and new-era publishes — so resolve
+# the new-era name first, then the legacy one.
+PKG_BASE=""
+exe=""
+for base in "tebako-runtime-$TEBAKO_VERSION-ruby-$RUBY_VERSION" \
+            "tebako-runtime-$TEBAKO_VERSION-$RUBY_VERSION"; do
+  exe="$(find "$RUNTIME_PKG_DIR" -maxdepth 1 -name "$base-*" \
+          ! -name "*.tfs" ! -name "*.sha256" ! -name "*.origin" ! -name "*.abi" \
+          ! -name "*.dll" ! -name "*.yaml" ! -name "*.json" | head -1)"
+  if [ -n "$exe" ]; then PKG_BASE="$base"; break; fi
+done
+[ -n "$exe" ] || die "no runtime exe tebako-runtime-$TEBAKO_VERSION-{ruby-,}$RUBY_VERSION-* under $RUNTIME_PKG_DIR"
 [ -f "$exe.tfs" ] || die "no env image at $exe.tfs"
 triplet="${exe##*"$PKG_BASE"-}"
 case "$triplet" in

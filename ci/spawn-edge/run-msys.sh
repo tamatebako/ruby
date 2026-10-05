@@ -58,10 +58,18 @@ w()    { cygpath -m "$1"; }
 sha256_file() { sha256sum "$1" | awk '{print $1}'; }
 
 # --- 0. the leg's artifacts ---------------------------------------------------
-PKG_BASE="tebako-runtime-$TEBAKO_VERSION-$RUBY_VERSION"
-pkg="$(find "$RUNTIME_PKG_DIR" -maxdepth 1 \( -name "$PKG_BASE-windows-ucrt64" -o -name "$PKG_BASE-windows-ucrt64.exe" \
-        -o -name "$PKG_BASE-windows-ucrt-arm64" -o -name "$PKG_BASE-windows-ucrt-arm64.exe" \) | head -1)"
-[ -n "$pkg" ] || die "no runtime exe $PKG_BASE-windows-ucrt64[.exe]|-ucrt-arm64[.exe] under $RUNTIME_PKG_DIR"
+# tebako#716 era law (see run.sh): resolve the new-era name (with the -ruby-
+# language segment) first, then the legacy one — the same harness serves
+# old-tag reruns and new-era publishes.
+PKG_BASE=""
+pkg=""
+for base in "tebako-runtime-$TEBAKO_VERSION-ruby-$RUBY_VERSION" \
+            "tebako-runtime-$TEBAKO_VERSION-$RUBY_VERSION"; do
+  pkg="$(find "$RUNTIME_PKG_DIR" -maxdepth 1 \( -name "$base-windows-ucrt64" -o -name "$base-windows-ucrt64.exe" \
+          -o -name "$base-windows-ucrt-arm64" -o -name "$base-windows-ucrt-arm64.exe" \) | head -1)"
+  if [ -n "$pkg" ]; then PKG_BASE="$base"; break; fi
+done
+[ -n "$pkg" ] || die "no runtime exe tebako-runtime-$TEBAKO_VERSION-{ruby-,}$RUBY_VERSION-windows-ucrt64[.exe]|-ucrt-arm64[.exe] under $RUNTIME_PKG_DIR"
 exe_stem="${pkg%.exe}"
 triplet="${exe_stem##*"$PKG_BASE"-}"
 [ -f "$exe_stem.tfs" ] || die "no env image at $exe_stem.tfs"
