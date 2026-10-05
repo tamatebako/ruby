@@ -116,8 +116,12 @@ step "press the fixture payload images (tfs mkimage, default format)"
 
 # --- 2. stage the scratch store ---------------------------------------------
 # spec 05 §3's grammar: runtimes/<engine>-<lv>-<tv>-<triplet>/ holding the
-# exe + env image + the image's sha256 trust anchor (the scan requires
-# exactly these), and payloads/<name>/<version>.tfs + .tfs.sha256 +
+# exe + env image + the image's sha256 trust anchor + the cached release
+# index (manifest.json — the scan flows the exe/image names off it
+# VERBATIM, era-agnostic; index-less, the synthesized fallback is the
+# pre-tebako#716 spelling only and a new-era pair is invisible to the
+# cache-only pick the probe's child makes), and
+# payloads/<name>/<version>.tfs + .tfs.sha256 +
 # .manifest.yaml. The mirror is the PRESSED manifest (tfs cat readback —
 # embedded wins, and the readback doubles as the press assertion).
 HOME_DIR="$SCRATCH/tebako-home"
@@ -132,6 +136,12 @@ cp "$exe.tfs" "$RT_DIR/$PKG_BASE-$triplet.tfs"
 chmod 0444 "$RT_DIR/$PKG_BASE-$triplet.tfs"
 echo "$(sha256_file "$RT_DIR/$PKG_BASE-$triplet.tfs")  $PKG_BASE-$triplet.tfs" > "$RT_DIR/$PKG_BASE-$triplet.tfs.sha256"
 echo "$(sha256_file "$RT_DIR/$PKG_BASE-$triplet")  $PKG_BASE-$triplet" > "$RT_DIR/$PKG_BASE-$triplet.sha256"
+# The cached release index, mirroring the installer's write side
+# (tebako-shim's runtime module owns the shape — spec 05 §2): the
+# three identity keys the scan matches on plus the verbatim filenames.
+printf '[{"tebako_version": "%s", "ruby_version": "%s", "platform": "%s", "filename": "%s", "image": {"filename": "%s"}}]\n' \
+  "$TEBAKO_VERSION" "$RUBY_VERSION" "$triplet" "$PKG_BASE-$triplet" "$PKG_BASE-$triplet.tfs" \
+  > "$RT_DIR/manifest.json"
 cp "$PROVIDER_IMG" "$PAYLOAD_DIR/1.0.0.tfs"
 chmod 0444 "$PAYLOAD_DIR/1.0.0.tfs"
 echo "$(sha256_file "$PAYLOAD_DIR/1.0.0.tfs")  1.0.0.tfs" > "$PAYLOAD_DIR/1.0.0.tfs.sha256"

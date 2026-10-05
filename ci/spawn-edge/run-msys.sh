@@ -121,6 +121,12 @@ cp "$exe_stem.dll" "$RT_DIR/$PE_DLL"
 cp "$exe_stem.tfs" "$STORE_IMG"
 echo "$(sha256_file "$STORE_IMG")  $PKG_BASE-$triplet.tfs" > "$STORE_IMG.sha256"
 echo "$(sha256_file "$STORE_EXE")  $PKG_BASE-$triplet.exe" > "$STORE_EXE.sha256"
+# The cached release index (see run.sh — tebako-shim owns the shape):
+# the scan flows the exe/image names off it verbatim, era-agnostic;
+# index-less, the synthesized fallback is pre-tebako#716-shaped only.
+printf '[{"tebako_version": "%s", "ruby_version": "%s", "platform": "%s", "filename": "%s", "image": {"filename": "%s"}}]\n' \
+  "$TEBAKO_VERSION" "$RUBY_VERSION" "$triplet" "$PKG_BASE-$triplet.exe" "$PKG_BASE-$triplet.tfs" \
+  > "$RT_DIR/manifest.json"
 cp "$PROVIDER_IMG" "$PAYLOAD_DIR/1.0.0.tfs"
 echo "$(sha256_file "$PAYLOAD_DIR/1.0.0.tfs")  1.0.0.tfs" > "$PAYLOAD_DIR/1.0.0.tfs.sha256"
 "$TFS_CLI" cat "$(w "$PROVIDER_IMG")" /__tpkg__/manifest.yaml > "$PAYLOAD_DIR/1.0.0.manifest.yaml" \
