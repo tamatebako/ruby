@@ -70,6 +70,13 @@ jobs:
     permissions:
       contents: write
     steps:
+      # The provenance ledger tool lives in the repo — the publish job needs
+      # the checkout (the release legs run their own; publish previously had
+      # none).
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: ruby/setup-ruby@95ef2b042f9d7a56d8268cba8559e2842e2ad01b # v1.321.0
+        with:
+          ruby-version: "3.2"
       # Diagnosability first: needs.<job>.result is evaluated server-side,
       # so echo exactly what the gate saw before doing anything else -- the
       # next publish-gate flake must be self-explaining in the job log.
@@ -88,6 +95,23 @@ jobs:
         run: |
           cat *.sha256 > SHA256SUMS
           rm -f *.sha256
+      # The provenance ledger (README § "Provenance ledger"): the
+      # cumulative, append-only record of every src-tarball digest this
+      # factory has published — what makes a runtime's recorded
+      # built_from.sources[].sha256 verifiable after the fact, even after
+      # the tarball re-rolls under the same version pin. Chained from the
+      # newest existing release's provenance.yaml (bootstrapped from every
+      # published SHA256SUMS while none carries one). Publish-gated: the
+      # ledger must extend the previous one as an exact prefix and cover
+      # every asset of this release, or the publish fails named.
+      - name: build + check the provenance ledger
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          tools/provenance --build \
+            --tag "${{ github.event_name == 'push' && github.ref_name || inputs.release_tag }}" \
+            --sums dist/SHA256SUMS \
+            --out dist/provenance.yaml
       # Record the published tag so the workflow_run follow-up
       # (runtime-pin-bump.yml) can read it back deterministically for both
       # trigger paths (tag push and manual dispatch).
@@ -104,3 +128,4 @@ jobs:
           files: |
             dist/*.tar.gz
             dist/SHA256SUMS
+            dist/provenance.yaml
