@@ -45,3 +45,61 @@ jobs:
         run: bundle exec tools/validate_msys_pairs
       - name: git apply --check every selected patch
         run: tools/lint "${{ matrix.version }}"
+
+  # The compile gate at change time (the release gate is
+  # _release-line.yml's smoke job): the same tools/smoke_matrix plan,
+  # diffed previous-release-tag..HEAD, so exactly the lines whose patch
+  # sets changed get legs — none when no patch set changed (the gate is
+  # then vacuously green). Apply-clean is not compile-clean (the v0.2.8
+  # lesson); a leg configures the line tip's tree per affected scenario
+  # and compiles every patched translation unit. The smoke-only darwin
+  # scenario runs on macos-latest; everything else on ubuntu-latest.
+  smoke-plan:
+    name: plan the compile-smoke legs
+    runs-on: ubuntu-latest
+    outputs:
+      smoke: ${{ steps.emit.outputs.smoke }}
+      smoke_count: ${{ steps.emit.outputs.smoke_count }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+      - name: fetch tags (previous-release diff base)
+        run: git fetch --tags --force
+      - uses: ruby/setup-ruby@95ef2b042f9d7a56d8268cba8559e2842e2ad01b # v1.321.0
+        with:
+          ruby-version: "3.2"
+      - id: emit
+        run: |
+          smoke=$(tools/smoke_matrix "change-$GITHUB_SHA")
+          {
+            echo "smoke=$smoke"
+            # The count drives the job-level if: on the smoke job (an
+            # unguarded empty matrix poisons the run conclusion).
+            echo "smoke_count=$(jq '.include | length' <<< "$smoke")"
+          } >> "$GITHUB_OUTPUT"
+          echo "plan: change=$GITHUB_SHA smoke legs=$smoke"
+
+  smoke:
+    name: smoke (${{ matrix.version }} / ${{ matrix.platform }})
+    needs: smoke-plan
+    if: needs.smoke-plan.outputs.smoke_count != '0'
+    strategy:
+      fail-fast: false
+      matrix: ${{ fromJSON(needs.smoke-plan.outputs.smoke) }}
+    runs-on: ${{ matrix.platform == 'darwin' && 'macos-latest' || 'ubuntu-latest' }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: ruby/setup-ruby@95ef2b042f9d7a56d8268cba8559e2842e2ad01b # v1.321.0
+        with:
+          ruby-version: "3.2"
+      - name: scenario toolchain
+        if: ${{ matrix.platform != 'darwin' }}
+        run: |
+          sudo apt-get update -qq
+          case "${{ matrix.platform }}" in
+            linux-musl) sudo apt-get install -y -qq musl-tools ;;
+            msys) sudo apt-get install -y -qq gcc-mingw-w64-x86-64 ;;
+          esac
+      - name: configure + compile patched translation units
+        run: tools/compile_smoke "${{ matrix.version }}" "$PWD/build/compile-smoke" --platform "${{ matrix.platform }}"

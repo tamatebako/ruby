@@ -11,7 +11,11 @@
 # linking, no exts.
 #
 # Toolchain per platform: linux-gnu native cc, linux-musl musl-gcc,
-# msys the x86_64-w64-mingw32 cross gcc (--host). The patched TUs include
+# msys the x86_64-w64-mingw32 cross gcc (--host, and CC is PINNED to
+# the cross gcc — with the native cc the tree configures for the host,
+# _WIN32 stays undefined, and the windows half of the patch set, the
+# code the msys scenario exists to compile, is silently never built).
+# The patched TUs include
 # the tebako memfs headers (<tebako/tebako-main.h>, <tebako/fs/c_api.h>),
 # resolved from the vendored compile-smoke stubs in ci/include (they
 # declare exactly the c_api surface the patches use, mirroring the real
@@ -43,8 +47,14 @@ INCLUDED_C = {
 PLATFORM_CONFIG = {
   "linux-gnu" => { "env" => {}, "configure" => [] },
   "linux-musl" => { "env" => { "CC" => "musl-gcc" }, "configure" => [] },
-  "msys" => { "env" => {}, "configure" => ["--host=x86_64-w64-mingw32"] },
+  "msys" => { "env" => { "CC" => "x86_64-w64-mingw32-gcc" }, "configure" => ["--host=x86_64-w64-mingw32"] },
   "darwin" => { "env" => {}, "configure" => [] }
+}.freeze
+
+# Where a pinned cross compiler comes from, per platform family.
+CC_INSTALL_HINT = {
+  "musl-gcc" => "debian/ubuntu: apt-get install musl-tools",
+  "x86_64-w64-mingw32-gcc" => "debian/ubuntu: apt-get install gcc-mingw-w64-x86-64; macos: brew install mingw-w64"
 }.freeze
 
 def native_platform
@@ -68,6 +78,14 @@ version = ARGV[0] or abort "usage: tools/compile_smoke <version> [outdir] [--pla
 outdir = File.expand_path(ARGV[1] || "build/compile-smoke")
 platform = options[:platform] || native_platform
 config = PLATFORM_CONFIG.fetch(platform) { abort "tools/compile_smoke: no toolchain config for platform #{platform.inspect}" }
+# A pinned cross compiler must be FOUND: without it configure falls back
+# to the host cc, the target's preprocessor set (_WIN32 for msys) never
+# materializes, and the leg greens without compiling the code it gates.
+cc = config["env"]["CC"]
+if cc && ENV.fetch("PATH", "").split(File::PATH_SEPARATOR).none? { |dir| File.executable?(File.join(dir, cc)) }
+  abort "tools/compile_smoke: #{platform} requires #{cc} on PATH (#{CC_INSTALL_HINT.fetch(cc, 'install it')}); " \
+        "a host-cc fallback would smoke the wrong target"
+end
 cache_dir = ENV.fetch("TFS_CACHE_DIR", Tfs::SourcePrep::DEFAULT_CACHE_DIR)
 
 selection = Tfs::PatchSelection.new

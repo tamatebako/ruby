@@ -99,16 +99,16 @@ module Tfs
     #   only, and a `_pass1`/`_pass2` marker scopes it to that pass's
     #   tarball alone;
     # * a terminal `_musl` patch feeds linux-musl only;
-    # * a terminal `_darwin` patch feeds NO shipped scenario today (no
-    #   darwin scenario exists — the base tarball is the linux-gnu
-    #   selection): it attributes to the empty set, and a darwin-only
-    #   change re-rolls nothing. THAT IS A MODEL FACT, not an oversight:
-    #   if a darwin scenario ever ships, extend SCENARIO_BUILDS and this
-    #   map together;
+    # * a terminal `_darwin` patch feeds the darwin COMPILE SMOKE only
+    #   (Tfs::Versions::SMOKE_ONLY_SCENARIOS): no darwin tarball ships,
+    #   so no build row ever matches the attribution, but the smoke
+    #   plan's universe includes it — a darwin-only change re-rolls no
+    #   asset yet still gates on the darwin leg;
     # * a base patch (no platform suffix) feeds every scenario — even
     #   when an msys/musl sibling shadows it on one target, the base
     #   patch still lands on the others (fail closed, never narrow a
-    #   base patch by shadowing);
+    #   base patch by shadowing) — and the smoke-only platforms too,
+    #   since the base selection is what compiles there;
     # * a line manifest (patch-<line>.yaml / patch-<line>.<patch>.yaml)
     #   re-scopes any feature in the line: all scenarios, fail closed.
     #
@@ -180,7 +180,7 @@ module Tfs
       case name.match(SCENARIO_SUFFIX)&.[](1)
       when "msys" then [["msys", pass]]
       when "musl" then [["linux-musl", nil]]
-      when "darwin" then []
+      when "darwin" then [["darwin", nil]]
       else
         # A base patch: every scenario; a pass marker on a base patch is
         # a manifest authoring error the lint gate owns — attribute wide.
@@ -189,7 +189,7 @@ module Tfs
     end
 
     def all_scenarios
-      Tfs::Versions::SCENARIOS.map { |scenario| [scenario, nil] }
+      (Tfs::Versions::SCENARIOS + Tfs::Versions::SMOKE_ONLY_SCENARIOS).map { |scenario| [scenario, nil] }
     end
   end
 end

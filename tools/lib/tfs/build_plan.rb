@@ -78,8 +78,9 @@ module Tfs
     # The line's changed-scenario list, failing CLOSED: a line the diff
     # saw patch changes for but attributes nothing to (a shape the
     # suffix rules do not produce today) feeds every scenario — never
-    # ship a possibly-stale copy. An explicitly EMPTY attribution (a
-    # darwin-only change — no shipped scenario) builds nothing.
+    # ship a possibly-stale copy. Attributions matching no build row
+    # (the smoke-only darwin scenario — no darwin tarball ships) build
+    # nothing.
     def attributed_scenarios(line)
       scenarios = @diff.changed_scenarios
       return all_scenarios if scenarios.nil?

@@ -201,7 +201,11 @@ wires children with `autoload`):
 - `tools/smoke_matrix <release-tag>` — prints the release-src
   compile-smoke matrix: one leg per (changed patch line × scenario) using
   the newest version of each line whose `patches/<line>/` folder changed
-  since the previous release tag (all lines when there is none).
+  since the previous release tag (all lines when there is none). The
+  scenario universe is the version's shipped scenarios plus the
+  smoke-only `darwin` leg — no darwin tarball ships, but a darwin tree
+  exists for every version (the base selection plus the `_darwin`
+  features), and its hunks compile nowhere else in the gate.
 - `tools/build_matrix <release-tag> [--build|--copies|--previous-tag]` —
   prints release-src's diff-aware build plan (fault isolation: a per-line
   patch change re-spends only that line). Over the same `Tfs::ReleaseDiff`
@@ -226,11 +230,18 @@ wires children with `autoload`):
   compile-smoke stubs in `ci/include` (they declare exactly the c_api
   surface the patches use, mirroring the real libtfs headers). Toolchains:
   linux-gnu native cc, linux-musl `musl-gcc`, msys the
-  `x86_64-w64-mingw32` cross gcc. Fails named:
+  `x86_64-w64-mingw32` cross gcc — pinned as `CC`, never configure's
+  host-cc fallback (a host tree leaves `_WIN32` undefined and the
+  windows half of the patch set uncompiled); a missing cross compiler
+  is a named error, not a silent host-tree smoke. Fails named:
   `FAIL <version> (<platform>): <objects> did not compile`.
 
 CI: `.github/workflows/lint-patches.yml` lints every version on a matrix
-generated from versions.yml; `.github/workflows/release-src.yml` (tags
+generated from versions.yml, then runs the same compile gate at change
+time (`tools/smoke_matrix` diffed previous-release-tag..HEAD — exactly
+the lines whose patch sets changed get legs; darwin legs run on
+`macos-latest`, everything else on `ubuntu-latest`);
+`.github/workflows/release-src.yml` (tags
 `v*` + manual dispatch) builds the per-scenario
 `tfs-ruby-<version>-src[-<scenario>].tar.gz` assets **diff-aware**
 (`tools/build_matrix`): only versions of changed patch lines compile —
@@ -246,7 +257,8 @@ v0.2.8 lesson — a patch release shipped apply-clean but uncompilable and
 broke every linux runtime leg): one representative leg per changed patch
 line × scenario (newest version of the line), each compiling the patched
 translation units far enough to catch a broken shim — no full runtime
-build. `.github/workflows/release-monitor.yml`
+build; the smoke-only darwin leg runs on `macos-latest`, the rest on
+`ubuntu-latest`. `.github/workflows/release-monitor.yml`
 (daily 06:17 UTC + manual dispatch) detects new official ruby releases and
 onboards each on its own lane: a clean onboard opens an
 "Onboard ruby X.Y.Z" pull request (peter-evans/create-pull-request), a

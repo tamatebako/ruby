@@ -118,25 +118,25 @@ RSpec.describe Tfs::ReleaseDiff do
       expect(diff.changed_scenarios).to eq("4.0" => [["linux-musl", nil]])
     end
 
-    it "attributes a darwin patch to nothing (no shipped scenario selects darwin today)" do
+    it "attributes a darwin patch to the smoke-only darwin scenario (no darwin tarball ships)" do
       diff = diff_with(["patches/4.0/configure_extstatic_bundle_loader_darwin.patch"])
-      expect(diff.changed_scenarios).to eq("4.0" => [])
+      expect(diff.changed_scenarios).to eq("4.0" => [["darwin", nil]])
     end
 
-    it "attributes a base patch to every scenario" do
+    it "attributes a base patch to every scenario, smoke-only ones included" do
       diff = diff_with(["patches/3.4/prism_compile_memfs.patch"])
-      expect(diff.changed_scenarios["3.4"]).to match_array([["linux-gnu", nil], ["linux-musl", nil], ["msys", nil]])
+      expect(diff.changed_scenarios["3.4"]).to match_array([["linux-gnu", nil], ["linux-musl", nil], ["msys", nil], ["darwin", nil]])
     end
 
     it "attributes a line manifest change to every scenario (fail closed)" do
       diff = diff_with(["patches/3.1/patch-3.1.yaml", "patches/3.4/patch-3.4.2.yaml"])
-      expect(diff.changed_scenarios["3.1"]).to match_array([["linux-gnu", nil], ["linux-musl", nil], ["msys", nil]])
-      expect(diff.changed_scenarios["3.4"]).to match_array([["linux-gnu", nil], ["linux-musl", nil], ["msys", nil]])
+      expect(diff.changed_scenarios["3.1"]).to match_array([["linux-gnu", nil], ["linux-musl", nil], ["msys", nil], ["darwin", nil]])
+      expect(diff.changed_scenarios["3.4"]).to match_array([["linux-gnu", nil], ["linux-musl", nil], ["msys", nil], ["darwin", nil]])
     end
 
     it "unions attributions across several changed patches of one line" do
       diff = diff_with(["patches/3.3/dir_c_memfs_msys.patch", "patches/3.3/io_c_tebako_includes.patch"])
-      expect(diff.changed_scenarios["3.3"]).to match_array([["linux-gnu", nil], ["linux-musl", nil], ["msys", nil]])
+      expect(diff.changed_scenarios["3.3"]).to match_array([["linux-gnu", nil], ["linux-musl", nil], ["msys", nil], ["darwin", nil]])
     end
   end
 

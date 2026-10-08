@@ -40,6 +40,13 @@ module Tfs
     SCENARIOS = %w[linux-gnu linux-musl msys].freeze
     DEFAULT_SCENARIOS = %w[linux-gnu].freeze
 
+    # Compile-smoke-only platforms: no src tarball ships for them (the
+    # darwin tree is the base selection plus the _darwin features), but
+    # without a smoke leg of their own their hunks compile nowhere in
+    # the gate. The smoke plan's universe is SCENARIOS +
+    # SMOKE_ONLY_SCENARIOS; the build plan's stays SCENARIOS.
+    SMOKE_ONLY_SCENARIOS = %w[darwin].freeze
+
     # scenario => release build rows (platform / GNUmakefile pass / asset
     # suffix). The msys two-pass GNUmakefile flow needs both trees; musl
     # is pass-invariant (only the msys-suffixed gnumakefile features carry

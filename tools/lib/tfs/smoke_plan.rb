@@ -11,8 +11,12 @@ module Tfs
   # * line: only lines whose patch set changed smoke at all;
   # * scenario: only the scenarios the changed patches FEED smoke
   #   (Tfs::ReleaseDiff#changed_scenarios — an msys patch never smokes
-  #   linux). A line whose attribution is explicitly empty (a darwin-only
-  #   change — no shipped scenario) smokes nothing.
+  #   linux). The universe is each version's shipped scenarios plus the
+  #   smoke-only platforms (Tfs::Versions::SMOKE_ONLY_SCENARIOS): a
+  #   darwin tree exists for every version (the base selection plus the
+  #   _darwin features) even though no darwin tarball ships, so a
+  #   darwin-only change smokes exactly the darwin leg and a base patch
+  #   smokes every shipped scenario AND darwin.
   #
   # A line-wide patch set means a representative leg per (line, scenario)
   # covers the changed translation units; per-version legs would multiply
@@ -52,10 +56,17 @@ module Tfs
 
     def affected_scenarios(entry)
       scenarios = @diff.changed_scenarios
-      return entry.scenarios if scenarios.nil?
+      return smoke_universe(entry) if scenarios.nil?
 
       attributed = scenarios.fetch(entry.line, [])
-      entry.scenarios & attributed.map(&:first).uniq
+      smoke_universe(entry) & attributed.map(&:first).uniq
+    end
+
+    # One version's smoke universe: the scenarios it ships plus the
+    # smoke-only platforms — a darwin tree exists for every version
+    # even though no darwin tarball ships.
+    def smoke_universe(entry)
+      entry.scenarios | Tfs::Versions::SMOKE_ONLY_SCENARIOS
     end
   end
 end
