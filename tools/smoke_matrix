@@ -6,6 +6,9 @@
 # Prints the release-src compile-smoke matrix as a GitHub Actions matrix
 # document: one leg per (changed line x AFFECTED scenario) — only the
 # scenarios the changed patches feed (an msys patch never smokes linux),
+# over each version's shipped scenarios plus the smoke-only darwin leg
+# (no darwin tarball ships, but the base selection plus the _darwin
+# features forms a darwin tree for every version — Tfs::SmokePlan),
 # where a "changed line" is a patches/<line>/ folder touched between the
 # previous release tag and <release-tag> (or HEAD when the tag does not
 # exist yet, e.g. a manual dispatch ahead of tagging; all lines when

@@ -144,7 +144,7 @@ RSpec.describe Tfs::BuildPlan do
     expect(plan.copies.size).to eq(6)
   end
 
-  it "re-rolls nothing on a darwin-only change (no shipped scenario selects darwin today)" do
+  it "re-rolls nothing on a darwin-only change (the darwin scenario is smoke-only — it matches no build row)" do
     plan = described_class.new(versions: versions, diff: diff_for(["patches/3.3/configure_extstatic_bundle_loader_darwin.patch"]), previous_versions: previous)
     expect(plan.builds).to eq([])
     expect(plan.copies.size).to eq(7)

@@ -74,7 +74,9 @@ jobs:
   # per affected scenario and compile each patched translation unit
   # (objects only — no runtime build, no link, no exts) against the
   # vendored stub tebako headers in ci/include. Only the scenarios the
-  # changed patches FEED get a leg (tools/smoke_matrix).
+  # changed patches FEED get a leg (tools/smoke_matrix). The smoke-only
+  # darwin scenario (no darwin tarball ships) runs on macos-latest;
+  # everything else on ubuntu-latest.
   smoke:
     name: smoke ${{ inputs.line }} (${{ matrix.version }} / ${{ matrix.platform }})
     needs: plan
@@ -82,13 +84,14 @@ jobs:
     strategy:
       fail-fast: false
       matrix: ${{ fromJSON(needs.plan.outputs.smoke) }}
-    runs-on: ubuntu-latest
+    runs-on: ${{ matrix.platform == 'darwin' && 'macos-latest' || 'ubuntu-latest' }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: ruby/setup-ruby@95ef2b042f9d7a56d8268cba8559e2842e2ad01b # v1.321.0
         with:
           ruby-version: "3.2"
       - name: scenario toolchain
+        if: ${{ matrix.platform != 'darwin' }}
         run: |
           sudo apt-get update -qq
           case "${{ matrix.platform }}" in

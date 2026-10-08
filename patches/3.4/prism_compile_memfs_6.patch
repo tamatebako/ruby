@@ -8,15 +8,18 @@
 # Read source files through the modern libtfs C API (<tebako/fs/c_api.h>,
 # tebako_fs_*) when the path is inside the memfs (tfs_string_file_init,
 # composed on the c_api read surface and mirroring the legacy
-# tebako_string_file_init), falling back to pm_read_file otherwise. The
-# in-mount check is a mount-point prefix check vs the compiled-in
-# fs_mount_point (tebako_mount_point()).
+# tebako_string_file_init), falling back to pm_read_file otherwise.
+# The file size is read through the pinned tebako_stat ABI (the c_api's
+# stat64 layout on windows, platform stat elsewhere): the CRT struct
+# stat has a 32-bit st_size on mingw, and tebako_fs_fstat fills 56
+# bytes regardless. The in-mount check is a mount-point prefix check
+# vs the compiled-in fs_mount_point (tebako_mount_point()).
 # X-Redesign: modern-api
 diff --git a/prism_compile.c b/prism_compile.c
 index c000b66..8bdb4d1 100644
 --- a/prism_compile.c
 +++ b/prism_compile.c
-@@ -1,6 +1,80 @@
+@@ -1,6 +1,82 @@
  #include "prism.h"
  #include "version.h"
  
@@ -27,7 +30,7 @@ index c000b66..8bdb4d1 100644
 +#include <fcntl.h>                /* O_RDONLY (not transitive on mingw) */
 +
 +/* ruby/win32.h maps 'stat' onto stati128 on _WIN32; the libtfs C API fills
-+   the CRT struct stat, so keep the plain name visible inside this block */
++   the pinned tebako_stat, so keep the plain name visible inside this block */
 +#pragma push_macro("stat")
 +#undef stat
 +#include <tebako/fs/c_api.h>     /* modern libtfs C API (tebako_fs_*) */
@@ -51,7 +54,9 @@ index c000b66..8bdb4d1 100644
 +tfs_string_file_init(pm_string_t *string, const char *filepath)
 +{
 +    int fd;
-+    struct stat sb;
++    /* The file size comes through the pinned tebako_stat ABI (c_api.h):
++       stat64 on windows, the platform stat elsewhere. */
++    struct tebako_stat sb;
 +    size_t size;
 +    uint8_t *source;
 +    ssize_t bytes_read;
@@ -97,7 +102,7 @@ index c000b66..8bdb4d1 100644
  /**
   * This compiler defines its own concept of the location of a node. We do this
   * because we want to pair line information with node identifier so that we can
-@@ -11281,7 +11354,24 @@
+@@ -11281,7 +11356,24 @@
  VALUE
  pm_load_file(pm_parse_result_t *result, VALUE filepath, bool load_error)
  {
