@@ -19,9 +19,18 @@
 # nogvl_copy_file_range and nogvl_copy_stream_sendfile skip the fast path
 # when either side is embedded and fall through to the read/write loop
 # (IO.copy_stream / FileUtils.cp out of the mounted image).
+# Fiber-scheduler fd dispatch guards: with a scheduler installed
+# (Async/io-event), io.c hands the fd to the scheduler hook, whose C
+# extension issues raw libc fcntl/read calls on it -- EBADF for an
+# embedded (memfs) fd, a flagged virtual descriptor the kernel does not
+# know. Embedded fds are served synchronously by the in-process engine
+# and never block, so the io_read/io_write/writev and io_pread/io_pwrite
+# dispatches skip the scheduler when the fd is embedded, and the
+# rb_io_maybe_wait funnel answers "ready" immediately instead of
+# waiting.
 # X-Redesign: modern-api
 diff --git a/io.c b/io.c
-index 17f8d57..a971dcf 100644
+index 70d6ed0..5df8339 100644
 --- a/io.c
 +++ b/io.c
 @@ -164,6 +164,193 @@
@@ -218,7 +227,113 @@ index 17f8d57..a971dcf 100644
  /* define system APIs */
  #ifdef _WIN32
  #undef open
-@@ -12605,6 +12605,15 @@
+@@ -1266,7 +1453,13 @@
+ rb_io_read_memory(rb_io_t *fptr, void *buf, size_t count)
+ {
+     VALUE scheduler = rb_fiber_scheduler_current();
+-    if (scheduler != Qnil) {
++    /* tebako: the fiber-scheduler hook hands the fd to out-of-core code
++       (io-event's C extension) that issues raw libc calls on it; an
++       embedded (memfs) fd is a flagged virtual descriptor the kernel
++       does not know, so the hook dies EBADF. Embedded fds are served
++       synchronously by the in-process engine and never block -- skip
++       the dispatch and let the direct path below serve the op. */
++    if (scheduler != Qnil && !tebako_fd_is_embedded(fptr->fd)) {
+         VALUE result = rb_fiber_scheduler_io_read_memory(scheduler, fptr->self, buf, count, 0);
+ 
+         if (!UNDEF_P(result)) {
+@@ -1299,7 +1492,13 @@
+ rb_io_write_memory(rb_io_t *fptr, const void *buf, size_t count)
+ {
+     VALUE scheduler = rb_fiber_scheduler_current();
+-    if (scheduler != Qnil) {
++    /* tebako: the fiber-scheduler hook hands the fd to out-of-core code
++       (io-event's C extension) that issues raw libc calls on it; an
++       embedded (memfs) fd is a flagged virtual descriptor the kernel
++       does not know, so the hook dies EBADF. Embedded fds are served
++       synchronously by the in-process engine and never block -- skip
++       the dispatch and let the direct path below serve the op. */
++    if (scheduler != Qnil && !tebako_fd_is_embedded(fptr->fd)) {
+         VALUE result = rb_fiber_scheduler_io_write_memory(scheduler, fptr->self, buf, count, 0);
+ 
+         if (!UNDEF_P(result)) {
+@@ -1335,7 +1534,13 @@
+     if (!iovcnt) return 0;
+ 
+     VALUE scheduler = rb_fiber_scheduler_current();
+-    if (scheduler != Qnil) {
++    /* tebako: the fiber-scheduler hook hands the fd to out-of-core code
++       (io-event's C extension) that issues raw libc calls on it; an
++       embedded (memfs) fd is a flagged virtual descriptor the kernel
++       does not know, so the hook dies EBADF. Embedded fds are served
++       synchronously by the in-process engine and never block -- skip
++       the dispatch and let the direct path below serve the op. */
++    if (scheduler != Qnil && !tebako_fd_is_embedded(fptr->fd)) {
+         // This path assumes at least one `iov`:
+         VALUE result = rb_fiber_scheduler_io_write_memory(scheduler, fptr->self, iov[0].iov_base, iov[0].iov_len, 0);
+ 
+@@ -1612,6 +1817,15 @@
+ #if EWOULDBLOCK != EAGAIN
+       case EWOULDBLOCK:
+ #endif
++        /* tebako: embedded (memfs) fds are served synchronously and
++           never block, so there is nothing to wait for -- answer
++           "ready" (the requested events) immediately instead of
++           dispatching to the fiber scheduler, whose hook issues raw
++           libc calls on a virtual descriptor the kernel does not know
++           (EBADF). */
++        if (tebako_fd_is_embedded(RFILE(io)->fptr->fd))
++            return events;
++
+         // The operation would block, so wait for the specified events:
+         return rb_io_wait(io, events, timeout);
+ 
+@@ -3405,7 +3619,13 @@
+     struct io_internal_read_struct *iis = (struct io_internal_read_struct *)arg;
+ 
+     VALUE scheduler = rb_fiber_scheduler_current();
+-    if (scheduler != Qnil) {
++    /* tebako: the fiber-scheduler hook hands the fd to out-of-core code
++       (io-event's C extension) that issues raw libc calls on it; an
++       embedded (memfs) fd is a flagged virtual descriptor the kernel
++       does not know, so the hook dies EBADF. Embedded fds are served
++       synchronously by the in-process engine and never block -- skip
++       the dispatch and let the direct path below serve the op. */
++    if (scheduler != Qnil && !tebako_fd_is_embedded(iis->fptr->fd)) {
+         VALUE result = rb_fiber_scheduler_io_read_memory(scheduler, iis->fptr->self, iis->buf, iis->capa, 0);
+ 
+         if (!UNDEF_P(result)) {
+@@ -6159,7 +6379,13 @@
+     struct prdwr_internal_arg *arg = (struct prdwr_internal_arg *)_arg;
+ 
+     VALUE scheduler = rb_fiber_scheduler_current();
+-    if (scheduler != Qnil) {
++    /* tebako: the fiber-scheduler hook hands the fd to out-of-core code
++       (io-event's C extension) that issues raw libc calls on it; an
++       embedded (memfs) fd is a flagged virtual descriptor the kernel
++       does not know, so the hook dies EBADF. Embedded fds are served
++       synchronously by the in-process engine and never block -- skip
++       the dispatch and let the direct path below serve the op. */
++    if (scheduler != Qnil && !tebako_fd_is_embedded(arg->fd)) {
+         VALUE result = rb_fiber_scheduler_io_pread_memory(scheduler, arg->io, arg->offset, arg->buf, arg->count, 0);
+ 
+         if (!UNDEF_P(result)) {
+@@ -6241,7 +6467,13 @@
+     struct prdwr_internal_arg *arg = _arg;
+ 
+     VALUE scheduler = rb_fiber_scheduler_current();
+-    if (scheduler != Qnil) {
++    /* tebako: the fiber-scheduler hook hands the fd to out-of-core code
++       (io-event's C extension) that issues raw libc calls on it; an
++       embedded (memfs) fd is a flagged virtual descriptor the kernel
++       does not know, so the hook dies EBADF. Embedded fds are served
++       synchronously by the in-process engine and never block -- skip
++       the dispatch and let the direct path below serve the op. */
++    if (scheduler != Qnil && !tebako_fd_is_embedded(arg->fd)) {
+         VALUE result = rb_fiber_scheduler_io_pwrite_memory(scheduler, arg->io, arg->offset, arg->buf, arg->count, 0);
+ 
+         if (!UNDEF_P(result)) {
+@@ -12605,6 +12837,15 @@
      if (!S_ISREG(stp->src_stat.st_mode))
          return 0;
  
@@ -234,7 +349,7 @@ index 17f8d57..a971dcf 100644
      src_size = stp->src_stat.st_size;
      src_offset = stp->src_offset;
      if (src_offset >= (rb_off_t)0) {
-@@ -12829,6 +12838,13 @@
+@@ -12829,6 +13070,13 @@
      if (!S_ISREG(stp->src_stat.st_mode))
          return 0;
  
