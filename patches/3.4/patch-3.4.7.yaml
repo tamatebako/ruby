@@ -4,6 +4,8 @@ version: "3.4.7"
 patches:
   # bundled openssl gem 3.3.0 sets V_FLAG_CRL_CHECK_ALL on the default
   # store; OpenSSL 3.6 hard-fails CRL-DP chains (tebako-runtime-ruby#123).
-  # removed upstream (ruby/openssl#949); vendored ssl.rb fixed >= 3.4.8
+  # removed upstream (ruby/openssl#949); vendored ssl.rb fixed >= 3.4.8,
+  # so the carry ends at this overlay -- never carried forward.
   - feature: openssl_ssl_default_store_crl_removal
     file: ../3.1/openssl_ssl_default_store_crl_removal.patch
+    until: "7"

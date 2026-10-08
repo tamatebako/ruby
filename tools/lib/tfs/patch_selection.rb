@@ -15,15 +15,18 @@ module Tfs
   # the set is narrowed to one coherent build scenario (slug suffix
   # conventions: terminal _msys / _darwin / _musl, and _pass1 / _pass2).
   class PatchSelection
-    # One resolved patch: manifest entry + absolute file path.
+    # One resolved patch: manifest entry + absolute file path. +until+ is
+    # the entry's overlay carry bound (nil for base selections and
+    # unbounded entries); only the onboarder's carry-forward reads it.
     class Patch
-      def initialize(path:, feature:, version:)
+      def initialize(path:, feature:, version:, carry_until: nil)
         @path = path
         @feature = feature
         @version = version
+        @until = carry_until
       end
 
-      attr_reader :path, :feature, :version
+      attr_reader :path, :feature, :version, :until
 
       def name
         File.basename(@path)

@@ -25,3 +25,6 @@ properties:
         version:
           type: string
           pattern: "^[0-9]+$"
+        until:
+          type: string
+          pattern: "^[0-9]+$"

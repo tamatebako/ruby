@@ -16,7 +16,10 @@ module Tfs
   #      kept only if it applies);
   #   4. carry the line's nearest lower overlay forward (e.g. the ruby3x7
   #      onigmo/winmain fixes) as a new patch-<line>.<z>.yaml, kept only
-  #      if its patches apply;
+  #      if its patches apply. An overlay entry with +until: "<z>"+ is
+  #      carried up to that patch level inclusive and dropped past it
+  #      (reported on the Result as dropped); a carried entry keeps its
+  #      bound, so the end survives further carries;
   #   5. lint: git apply --check of the whole selected set against the
   #      sha256-verified official tarball.
   # On any failure every touched file is restored; nothing is released
@@ -24,18 +27,21 @@ module Tfs
   class Onboarder
     # The outcome of one onboarding attempt. `failures` maps each failing
     # patch name to its git apply output (the failing hunk), so the monitor
-    # workflow can file an issue that carries the actual drift.
+    # workflow can file an issue that carries the actual drift. `dropped`
+    # names the overlay features whose +until+ bound ended the carry at
+    # this patch level (the feature retired; not a failure).
     class Result
-      def initialize(version:, applied:, failing:, written:, extended:, failures: {})
+      def initialize(version:, applied:, failing:, written:, extended:, failures: {}, dropped: [])
         @version = version
         @applied = applied
         @failing = failing
         @written = written
         @extended = extended
         @failures = failures
+        @dropped = dropped
       end
 
-      attr_reader :version, :failing, :written, :extended, :failures
+      attr_reader :version, :failing, :written, :extended, :failures, :dropped
 
       def applied?
         @applied
@@ -43,7 +49,8 @@ module Tfs
 
       def to_h
         { "version" => @version, "applied" => applied?, "failing" => @failing,
-          "failures" => @failures, "extended" => @extended, "written" => @written }
+          "failures" => @failures, "extended" => @extended, "dropped" => @dropped,
+          "written" => @written }
       end
     end
 
@@ -67,7 +74,7 @@ module Tfs
       ensure_line_manifest(line, originals, written)
       extended = extend_partitions(version_name, originals, written)
 
-      candidates = overlay_candidates(line, patchlevel)
+      candidates, dropped = overlay_candidates(line, patchlevel)
       outcomes = Dir.mktmpdir do |dir|
         build_prep.audit(version_name, dir, patches: selected_patches(version_name) + candidates)
       end
@@ -80,7 +87,8 @@ module Tfs
       restore(originals) unless applied
 
       Result.new(version: version_name, applied: applied, failing: failing,
-                 written: applied ? written.uniq : [], extended: extended, failures: failures)
+                 written: applied ? written.uniq : [], extended: extended, failures: failures,
+                 dropped: dropped)
     end
 
     private
@@ -210,22 +218,32 @@ module Tfs
 
     # --- overlay carry-forward ------------------------------------------------
 
+    # Candidates for the overlay carry, plus the features whose +until+
+    # bound ends the carry at this patch level: [carried, dropped].
     def overlay_candidates(line, patchlevel)
-      return [] if File.exist?(File.join(@patches_root, line, "patch-#{line}.#{patchlevel}.yaml"))
+      return [[], []] if File.exist?(File.join(@patches_root, line, "patch-#{line}.#{patchlevel}.yaml"))
 
       overlays = Dir.glob(File.join(@patches_root, line, "patch-#{line}.*.yaml")).filter_map do |path|
         overlay_z = path[/#{Regexp.escape(line)}\.(\d+)\.yaml\z/, 1]
         overlay_z if overlay_z && overlay_z.to_i < patchlevel.to_i
       end
-      return [] if overlays.empty?
+      return [[], []] if overlays.empty?
 
       nearest_z = overlays.max_by(&:to_i)
       manifest = PatchManifest.new(File.join(@patches_root, line, "patch-#{line}.#{nearest_z}.yaml"))
       line_dir = File.join(@patches_root, line)
-      manifest.entries.map do |entry|
-        PatchSelection::Patch.new(path: File.expand_path(entry.file, line_dir),
-                                  feature: entry.feature, version: entry.version)
+      carried = []
+      dropped = []
+      manifest.entries.each do |entry|
+        if entry.carriable_to?(patchlevel)
+          carried << PatchSelection::Patch.new(path: File.expand_path(entry.file, line_dir),
+                                               feature: entry.feature, version: entry.version,
+                                               carry_until: entry.until)
+        else
+          dropped << entry.feature
+        end
       end
+      [carried, dropped]
     end
 
     def carry_overlay(line, patchlevel, candidates, originals, written)
@@ -241,6 +259,7 @@ module Tfs
       candidates.each do |patch|
         out << "  - feature: #{patch.feature}"
         out << "    file: #{Pathname.new(patch.path).relative_path_from(Pathname.new(line_dir))}"
+        out << "    until: \"#{patch.until}\"" unless patch.until.nil?
       end
       File.write(path, out.join("\n") + "\n")
       written << path

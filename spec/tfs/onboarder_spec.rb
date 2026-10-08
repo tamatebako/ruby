@@ -9,9 +9,10 @@ RSpec.describe Tfs::Onboarder do
 
   # Builds a scratch repo: versions.yml from the fixture, a 3.3 line
   # manifest with one real patch (tiny), a complete-partition family (gnu),
-  # and a 3.3.7 overlay (exact_only). Cache is seeded with a runtime-built
+  # and a 3.3.7 overlay (exact_only; +overlay_until+ bounds the onboarder's
+  # carry-forward of it). Cache is seeded with a runtime-built
   # tarball for the new version, so nothing touches the network.
-  def build_repo(dir, with_bogus: false)
+  def build_repo(dir, with_bogus: false, overlay_until: nil)
     FileUtils.cp(File.join(SPEC_FIXTURES, "versions.yml"), File.join(dir, "versions.yml"))
 
     line_dir = File.join(dir, "patches", "3.3")
@@ -40,12 +41,10 @@ RSpec.describe Tfs::Onboarder do
       manifest += ["  - feature: bogus", "    file: bogus.patch"]
     end
     File.write(File.join(line_dir, "patch-3.3.yaml"), manifest.join("\n") + "\n")
-    File.write(File.join(line_dir, "patch-3.3.7.yaml"), <<~YAML)
-      version: "3.3.7"
-      patches:
-        - feature: exact_only
-          file: exact_only.patch
-    YAML
+    overlay = ["version: \"3.3.7\"", "patches:",
+               "  - feature: exact_only", "    file: exact_only.patch"]
+    overlay << "    until: \"#{overlay_until}\"" unless overlay_until.nil?
+    File.write(File.join(line_dir, "patch-3.3.7.yaml"), overlay.join("\n") + "\n")
   end
 
   def build_tarball(dir, version)
@@ -59,14 +58,20 @@ RSpec.describe Tfs::Onboarder do
     tarball
   end
 
-  def onboard_in(dir, version, with_bogus: false)
-    build_repo(dir, with_bogus: with_bogus)
+  def onboard_in(dir, version, with_bogus: false, overlay_until: nil, releases: nil)
+    build_repo(dir, with_bogus: with_bogus, overlay_until: overlay_until)
+    seed_cache(dir, version)
+    result = described_class.new(releases: releases || self.releases, repo_root: dir,
+                                 cache_dir: File.join(dir, "cache")).onboard(version)
+    [result, File.join(dir, "ruby-#{version}.tar.gz")]
+  end
+
+  def seed_cache(dir, version)
     cache = File.join(dir, "cache")
     FileUtils.mkdir_p(cache)
     tarball = build_tarball(dir, version)
     FileUtils.cp(tarball, File.join(cache, "ruby-#{version}.tar.gz"))
-    result = described_class.new(releases: releases, repo_root: dir, cache_dir: cache).onboard(version)
-    [result, tarball]
+    tarball
   end
 
   it "pins the new version into versions.yml and lints clean" do
@@ -107,6 +112,53 @@ RSpec.describe Tfs::Onboarder do
       text = File.read(overlay)
       expect(text).to include('version: "3.3.8"')
       expect(text).to include("feature: exact_only")
+    end
+  end
+
+  it "drops an overlay entry whose until bound ends at its own overlay" do
+    Dir.mktmpdir do |dir|
+      result, = onboard_in(dir, "3.3.8", overlay_until: "7")
+
+      expect(result).to be_applied
+      expect(result.dropped).to eq(["exact_only"])
+      expect(result.to_h["dropped"]).to eq(["exact_only"])
+      expect(File.exist?(File.join(dir, "patches", "3.3", "patch-3.3.8.yaml"))).to be(false)
+      expect(File.read(File.join(dir, "versions.yml"))).to include("  3.3.8:\n")
+    end
+  end
+
+  it "carries an entry inside its until bound and preserves the bound" do
+    Dir.mktmpdir do |dir|
+      result, = onboard_in(dir, "3.3.8", overlay_until: "8")
+
+      expect(result).to be_applied
+      expect(result.dropped).to eq([])
+      overlay = File.join(dir, "patches", "3.3", "patch-3.3.8.yaml")
+      expect(File.read(overlay)).to match(/- feature: exact_only\n    file: exact_only\.patch\n    until: "8"/)
+    end
+  end
+
+  it "ends the carry at a preserved bound on the next onboarding" do
+    Dir.mktmpdir do |dir|
+      build_repo(dir, overlay_until: "8")
+      seed_cache(dir, "3.3.8")
+      described_class.new(releases: releases, repo_root: dir, cache_dir: File.join(dir, "cache")).onboard("3.3.8")
+
+      with_339 = Tfs::RubyReleases.new(
+        File.read(File.join(SPEC_FIXTURES, "releases.html")).sub(
+          "</table>",
+          "  <tr><td>Ruby 3.3.9</td><td>2025-10-01</td><td>" \
+          '<a href="https://cache.ruby-lang.org/pub/ruby/3.3/ruby-3.3.9.tar.gz">download</a></td></tr>'"\n</table>"
+        )
+      )
+      seed_cache(dir, "3.3.9")
+      result = described_class.new(releases: with_339, repo_root: dir,
+                                   cache_dir: File.join(dir, "cache")).onboard("3.3.9")
+
+      expect(result).to be_applied
+      expect(result.dropped).to eq(["exact_only"])
+      expect(File.exist?(File.join(dir, "patches", "3.3", "patch-3.3.8.yaml"))).to be(true)
+      expect(File.exist?(File.join(dir, "patches", "3.3", "patch-3.3.9.yaml"))).to be(false)
     end
   end
 
