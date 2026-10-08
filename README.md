@@ -64,7 +64,10 @@ variant for the other platforms (e.g. `dir_c_memfs` vs `dir_c_memfs_msys`).
 Manifest schema (`schema/patches.schema.yml`): `version: "<line>"` plus a
 `patches:` **array** of entries (ordered; entries apply in listed order).
 Each entry: `feature: <snake_case>`, `file: <path>` (local or
-`../<line>/...`), and optionally `version: "<patch>"`.
+`../<line>/...`), and optionally `version: "<patch>"`. An overlay entry
+may also carry `until: "<patch>"`: the release monitor carries the entry
+forward up to that patch level inclusive, then drops it — the model for a
+feature that ends mid-line (e.g. upstream absorbed the fix).
 
 Resolution for ruby **X.Y.Z** (`Tfs::PatchSelection`):
 
@@ -190,7 +193,9 @@ wires children with `autoload`):
   versions.yml (official URL + sha256 of the fetched tarball), seeds a
   manifest for a new line from the nearest existing line, extends
   complete-partition families to the new patch level, carries the line's
-  overlay forward, and lints the whole set with `git apply --check`
+  overlay forward (entries bounded by `until:` are dropped past their
+  bound, with the bound preserved across carries), and lints the whole
+  set with `git apply --check`
   against the sha256-verified tarball. On any failure every touched file
   is restored — nothing is released silently.
 - `tools/smoke_matrix <release-tag>` — prints the release-src

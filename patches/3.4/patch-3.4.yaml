@@ -32,6 +32,9 @@ patches:
   - feature: openssl_extconf_ruby_export_msys
     file: openssl_extconf_ruby_export_msys_10.patch
     version: "10"
+  - feature: openssl_extconf_ruby_export_msys
+    file: openssl_extconf_ruby_export_msys_10.patch
+    version: "11"
   # clang (and cl.exe) reject digest.h's plain extern against digest.c's
   # dllexport definition under --with-static-linked-ext; upstream's macro
   # fix, carried for every 3.4.x (unshipped upstream, ruby/ruby d0e0f2af)
@@ -89,6 +92,9 @@ patches:
   - feature: prism_compile_memfs
     file: prism_compile_memfs_6.patch
     version: "10"
+  - feature: prism_compile_memfs
+    file: prism_compile_memfs_6.patch
+    version: "11"
   - feature: ruby_c_fcntl_shim
     file: ruby_c_fcntl_shim.patch
   - feature: ruby_c_memfs_path_msys
