@@ -74,14 +74,30 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          gh issue create \
-            --title "Onboard ruby ${{ matrix.version }}: patches fail to apply" \
-            --body "The release monitor could not onboard ruby **${{ matrix.version }}** -- some patches do not apply to the official tarball. No release was made.
+          title="Onboard ruby ${{ matrix.version }}: patches fail to apply"
+          # One open issue per version: the monitor runs daily, and re-filing
+          # the same failure every run buried the canonical report under
+          # duplicates (#116-#134 for 3.4.11). When an open issue with the
+          # same title exists, comment on the oldest one instead of filing.
+          existing=$(TITLE="$title" gh issue list \
+            --repo "$GITHUB_REPOSITORY" --state open --limit 200 \
+            --json number,title \
+            --jq '[.[] | select(.title == env.TITLE) | .number] | min // empty')
+          if [ -n "$existing" ]; then
+            gh issue comment "$existing" --repo "$GITHUB_REPOSITORY" --body "Still failing as of $(date -u +%Y-%m-%dT%H:%M:%SZ) -- [run logs]($GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID). Latest result:
+          \`\`\`json
+          $(cat monitor-result.json)
+          \`\`\`"
+          else
+            gh issue create --repo "$GITHUB_REPOSITORY" \
+              --title "$title" \
+              --body "The release monitor could not onboard ruby **${{ matrix.version }}** -- some patches do not apply to the official tarball. No release was made.
 
           Failing patches, with the git apply hunk output for each under \`failures\`:
           \`\`\`json
           $(cat monitor-result.json)
           \`\`\`"
+          fi
       - name: notify downstream runtime (optional)
         if: success() && vars.RELEASE_MONITOR_DISPATCH == 'true'
         env:
