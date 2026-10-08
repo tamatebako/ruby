@@ -11,11 +11,13 @@ module Tfs
 
     MAX_REDIRECTS = 5
 
-    def self.body(url)
+    def self.body(url, headers: {})
       uri = URI.parse(url)
       MAX_REDIRECTS.times do
         Net::HTTP.start(uri.host, uri.port, use_ssl: uri.scheme == "https") do |http|
-          response = http.request(Net::HTTP::Get.new(uri))
+          request = Net::HTTP::Get.new(uri)
+          headers.each { |name, value| request[name] = value }
+          response = http.request(request)
           case response
           when Net::HTTPSuccess
             return response.body

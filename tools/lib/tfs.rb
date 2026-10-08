@@ -18,4 +18,6 @@ module Tfs
   autoload :BuildPlan, "tfs/build_plan"
   autoload :SmokePlan, "tfs/smoke_plan"
   autoload :ReleaseCopier, "tfs/release_copier"
+  autoload :Provenance, "tfs/provenance"
+  autoload :ProvenanceFeed, "tfs/provenance_feed"
 end

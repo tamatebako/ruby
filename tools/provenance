@@ -1,0 +1,124 @@
+#!/usr/bin/env ruby
+# frozen_string_literal: true
+
+# Usage:
+#   tools/provenance --build --tag <vX.Y.Z> --sums <SHA256SUMS> --out <provenance.yaml>
+#   tools/provenance --verify <sha256> [--ledger <file>|-]
+#
+# --build (release-src's publish gate): chains the new release's
+# provenance.yaml ledger from the newest existing release's ledger — or
+# BOOTSTRAPS it from every published release's SHA256SUMS when none carries
+# one yet (the one-time recovery path) — then asserts the invariants and
+# writes the ledger the release attaches:
+#   append-only  the previous ledger is an exact prefix of the new one;
+#   completeness every asset of this release's SHA256SUMS is recorded.
+# Either failure is named and fails the publish: a re-rolled tarball never
+# silently drops a published runtime's provenance (Tfs::Provenance).
+#
+# --verify (the audit path): resolves a recorded digest against a ledger —
+# a local file, "-" for stdin, or by default the newest release's
+# published provenance.yaml. Prints every attesting entry; an unattested
+# digest is a named error, exit 1.
+#
+# GH_TOKEN/GITHUB_TOKEN (optional) authorizes the releases-API calls.
+
+$LOAD_PATH.unshift(File.expand_path("lib", __dir__))
+require "tfs"
+
+USAGE = "usage: tools/provenance --build --tag <vX.Y.Z> --sums <SHA256SUMS> --out <file>\n" \
+        "       tools/provenance --verify <sha256> [--ledger <file>|-]"
+
+def option(arguments, name)
+  index = arguments.index(name)
+  return nil unless index
+
+  value = arguments[index + 1]
+  abort "tools/provenance: #{name} needs a value\n#{USAGE}" if value.nil? || value.start_with?("--")
+
+  value
+end
+
+def feed
+  Tfs::ProvenanceFeed.new(token: ENV["GH_TOKEN"] || ENV.fetch("GITHUB_TOKEN", nil))
+end
+
+def build(arguments)
+  tag = option(arguments, "--tag")
+  sums = option(arguments, "--sums")
+  out = option(arguments, "--out")
+  abort "tools/provenance: --build needs --tag, --sums and --out\n#{USAGE}" if [tag, sums, out].any?(&:nil?)
+  abort "tools/provenance: cannot read #{sums}" unless File.file?(sums)
+
+  releases = feed.releases
+  base = releases.last
+  chained = base && base["assets"].include?("provenance.yaml")
+  if chained
+    previous = Tfs::Provenance.parse(feed.asset_body(base["tag"], "provenance.yaml"))
+    mode = "chained from #{base['tag']} (#{previous.size} entries)"
+  else
+    # One-time recovery path: no published release carries a ledger yet, so
+    # derive the history from every published SHA256SUMS, oldest first —
+    # first appearance owns first_release.
+    previous = []
+    releases.each do |release|
+      sums_entries = Tfs::Provenance.entries_from_sums(release["tag"], feed.asset_body(release["tag"], "SHA256SUMS"))
+      previous = Tfs::Provenance.chain(previous, sums_entries)
+    end
+    mode = "bootstrap over #{releases.size} published releases (#{previous.size} entries; " \
+           "no previous ledger to prefix-check)"
+  end
+
+  current = Tfs::Provenance.entries_from_sums(tag, File.read(sums))
+  merged = Tfs::Provenance.chain(previous, current)
+  Tfs::Provenance.assert_prefix(previous, merged) if chained
+  Tfs::Provenance.assert_complete(merged, current)
+  File.write(out, Tfs::Provenance.serialize(merged))
+
+  added = merged.size - previous.size
+  puts "provenance: #{mode}"
+  puts "provenance: #{tag} adds #{added} entr#{added == 1 ? 'y' : 'ies'} (of #{current.size} assets); " \
+       "ledger now #{merged.size} entries"
+  puts "provenance: append-only + completeness assertions passed; wrote #{out}"
+end
+
+def verify(arguments)
+  sha256 = arguments[1]
+  abort "tools/provenance: --verify needs a sha256\n#{USAGE}" if sha256.nil? || sha256.start_with?("--")
+
+  ledger = option(arguments, "--ledger")
+  if ledger == "-"
+    text = $stdin.read
+    source = "stdin"
+  elsif ledger
+    abort "tools/provenance: cannot read #{ledger}" unless File.file?(ledger)
+
+    text = File.read(ledger)
+    source = ledger
+  else
+    latest = feed.releases.last
+    abort "tools/provenance: no published release to read the ledger from" if latest.nil?
+    unless latest["assets"].include?("provenance.yaml")
+      abort "tools/provenance: the newest release #{latest['tag']} carries no provenance.yaml " \
+            "(pre-ledger era) — pass --ledger explicitly"
+    end
+
+    text = feed.asset_body(latest["tag"], "provenance.yaml")
+    source = "release #{latest['tag']}"
+  end
+
+  matches = Tfs::Provenance.verify(Tfs::Provenance.parse(text), sha256.downcase, source: source)
+  matches.each do |entry|
+    puts "#{entry['sha256']}  #{entry['asset']}  (first published: #{entry['first_release']})"
+  end
+  puts "provenance: attested by #{source}"
+end
+
+begin
+  case ARGV[0]
+  when "--build" then build(ARGV)
+  when "--verify" then verify(ARGV)
+  else abort USAGE
+  end
+rescue Tfs::Provenance::Error, Tfs::ProvenanceFeed::Error => e
+  abort "tools/provenance: #{e.message}"
+end

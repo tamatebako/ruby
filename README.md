@@ -118,6 +118,46 @@ identifiers to anything `tools/apply` writes into the tree. The local
 harness scripts tolerate bsdtar (macOS) without the clamp flags: their
 mirror is single-machine scratch consumed in the same run.
 
+## Provenance ledger
+
+The authoritative provenance of a runtime build input is the tarball's
+**content digest** (tebako-runtime-ruby records it as
+`built_from.sources[].sha256`). A release *name* is only fetch metadata:
+the rolling releases re-roll a version's tarball whenever its line's
+patches move, and a deleted release leaves a recorded name dangling — so
+the digest is what must be verifiable after the fact.
+
+Every release therefore carries **`provenance.yaml`**: the cumulative,
+append-only ledger of every `(asset, sha256)` pair this factory has ever
+published, each with the release that first carried those bytes
+(`Tfs::Provenance`, built by `tools/provenance --build` in release-src's
+publish job). Two publish-gate assertions make the invariant loud:
+
+- **append-only** — the previous release's ledger must be an exact prefix
+  of the new one: a re-rolled tarball appends an entry; a published digest
+  is never dropped, reordered, or re-attributed;
+- **completeness** — every asset of the release being published is
+  recorded.
+
+Either failure fails the publish with a named error. The ledger chains
+through the newest existing release (bootstrapped from every published
+SHA256SUMS while none carries one): **never delete factory releases** —
+deleting the newest one breaks the chain and blocks the next publish.
+
+Audit any recorded digest against the ledger (a runtime manifest's
+`built_from.sources[].sha256` resolves against the `provenance.yaml` of
+its own `built_from.release`, or of the newest release — the ledger only
+ever grows):
+
+```
+tools/provenance --verify <sha256>                      # newest release's ledger
+tools/provenance --verify <sha256> --ledger <file>      # offline / pinned ledger
+```
+
+An attested digest prints its asset and first-publishing release; an
+unattested one is a named error, exit 1 — loud, never a silent dangle.
+
+
 ## Placeholders
 
 The gem computes the tebako static library list (`MAINLIBS`) dynamically per
@@ -235,6 +275,14 @@ wires children with `autoload`):
   windows half of the patch set uncompiled); a missing cross compiler
   is a named error, not a silent host-tree smoke. Fails named:
   `FAIL <version> (<platform>): <objects> did not compile`.
+- `tools/provenance --build | --verify` — the src-tarball provenance
+  ledger (see "Provenance ledger"). `--build` (release-src's publish job;
+  `Tfs::ProvenanceFeed` over the releases API) chains the release's
+  `provenance.yaml` from the newest existing release's ledger — or
+  bootstraps it from every published SHA256SUMS when none carries one —
+  asserting append-only + completeness before the release is created.
+  `--verify <sha256>` is the audit lookup: resolves a digest to its asset
+  and first-publishing release, or fails named when unattested.
 
 CI: `.github/workflows/lint-patches.yml` lints every version on a matrix
 generated from versions.yml, then runs the same compile gate at change
@@ -251,7 +299,8 @@ forward from the previous release as sha256-verified copies
 (`tools/copy_asset`), so the release's asset set stays complete
 (`linux-gnu` stays the unsuffixed back-compat asset; msys ships
 `-msys-pass1`/`-msys-pass2`). Built artifacts are verified against the
-apply output, and the tarballs plus a `SHA256SUMS` are published to the
+apply output, and the tarballs plus a `SHA256SUMS` plus the publish-gated
+`provenance.yaml` ledger (see "Provenance ledger") are published to the
 release. Publish is gated on the compile-smoke matrix (roadmap 17.0; the
 v0.2.8 lesson — a patch release shipped apply-clean but uncompilable and
 broke every linux runtime leg): one representative leg per changed patch
