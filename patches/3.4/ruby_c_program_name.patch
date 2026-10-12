@@ -1,0 +1,52 @@
+# ruby_c_program_name.patch
+#
+# Target:  ruby.c (pass2 (all platforms))
+# Source:  new for ruby#142 (tebako#237's ruby half)
+#
+# Assign $0/$PROGRAM_NAME from TEBAKO_PROGRAM_NAME when the driver exports
+# it (the boot contract): a packaged binstub otherwise reports the resolved
+# in-VFS script path as its program name. Read once, after the script
+# name's final assignment in process_options, before the entry loads. The
+# driver's env scrub keeps the variable from spawned children.
+--- a/ruby.c
++++ b/ruby.c
+@@ -183,6 +183,7 @@
+ #define FEATURE_SET_BITS(feat) ((feat).set & (feat).mask)
+ 
+ static void init_ids(ruby_cmdline_options_t *);
++static void tebako_program_name_apply(void);
+ 
+ #define src_encoding_index GET_VM()->src_encoding_index
+ 
+@@ -2538,6 +2539,7 @@
+         prism_script(opt, &result.prism);
+     }
+     ruby_set_script_name(opt->script_name);
++    tebako_program_name_apply(); /* tebako: the boot-contract program name (ruby#142) */
+     if ((dump & DUMP_BIT(yydebug)) && !(dump &= ~DUMP_BIT(yydebug))) {
+         dispose_result();
+         return Qtrue;
+@@ -3017,7 +3019,23 @@
+ {
+     rb_orig_progname = rb_progname = name;
+     rb_vm_set_progname(rb_progname);
++}
++
++/* -- Start of tebako patch -- */
++/* The tebako driver names the invoked program in TEBAKO_PROGRAM_NAME (the
++   boot contract); a packaged binstub otherwise reports the resolved in-VFS
++   script path as $0/$PROGRAM_NAME. Read once, after the script name's final
++   assignment, before the entry loads. The driver's env scrub keeps the
++   variable from spawned children. */
++static void
++tebako_program_name_apply(void)
++{
++    const char *tebako_progname = getenv("TEBAKO_PROGRAM_NAME");
++    if (tebako_progname != NULL && *tebako_progname != '\0') {
++        set_progname(rb_str_freeze(external_str_new_cstr(tebako_progname)));
++    }
+ }
++/* -- End of tebako patch -- */
+ 
+ void
+ ruby_script(const char *name)
