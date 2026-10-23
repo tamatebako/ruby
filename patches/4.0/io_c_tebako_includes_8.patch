@@ -1,0 +1,401 @@
+# io_c_tebako_includes_8.patch — the 4.0.8+ body
+#
+# ruby 4.0.8 turned the EAGAIN arm of rb_io_maybe_wait into a block
+# (`VALUE result = rb_io_wait(...); errno = error; return result;`), so the
+# hunk that skips the scheduler wait for an embedded fd no longer matched
+# the 4.0.0-4.0.7 body. Every other hunk is the same edit; this body is
+# refreshed against the 4.0.8 tree and applies to 4.0.8 and 4.0.9.
+#
+# Target:  io.c (pass2 (linux gnu/musl, macos))
+# Source:  tebako gem lib/tebako/packager/pass2_patch.rb Pass2Patch#io_c_patch
+#
+# Route ruby's io into the tebako memfs via the modern libtfs C API
+# (<tebako/fs/c_api.h>, tebako_fs_*): paths under the compiled-in
+# fs_mount_point (tebako_mount_point()) go to the memfs, everything else to
+# the host fs. The memfs is read-only: a write open on an in-mount path
+# fails EROFS (POSIX) rather than falling through to the host open, which
+# answered ENOENT for a path that does not exist there and defeated the
+# callers' read-only-fs degradation (bundler's ProcessLock rescue).
+# File-descriptor calls dispatch on tebako_fd_is_embedded() (the c_api FD
+# introspection), so host pipes/sockets keep their native behavior.
+# libtfs c_api extension (requested): tebako_fs_pread -- a positional read
+# that does not move the file position (IO#pread on memfs files).
+# copy_stream's zero-copy fast paths issue their syscalls on the raw fds,
+# which the kernel rejects EBADF for an embedded (memfs) fd, so
+# nogvl_copy_file_range and nogvl_copy_stream_sendfile skip the fast path
+# when either side is embedded and fall through to the read/write loop
+# (IO.copy_stream / FileUtils.cp out of the mounted image).
+# Fiber-scheduler fd dispatch guards: with a scheduler installed
+# (Async/io-event), io.c hands the fd to the scheduler hook, whose C
+# extension issues raw libc fcntl/read calls on it -- EBADF for an
+# embedded (memfs) fd, a flagged virtual descriptor the kernel does not
+# know. Embedded fds are served synchronously by the in-process engine
+# and never block, so the io_read/io_write/writev, io_pread/io_pwrite,
+# buffered-flush, and io_close dispatches (the last two are live
+# upstream on this line) skip the scheduler when the fd is embedded,
+# and the rb_io_maybe_wait funnel answers "ready" immediately instead
+# of waiting.
+# X-Redesign: modern-api
+diff --git a/io.c b/io.c
+index 738bca9..2a14cea 100644
+--- a/io.c
++++ b/io.c
+@@ -179,6 +179,193 @@ off_t __syscall(quad_t number, ...);
+ 
+ #define IO_MAX_BUFFER_GROWTH 8 * 1024 * 1024 // 8MB
+ 
++/* -- Start of tebako patch -- */
++#include <tebako/tebako-main.h> /* tebako_mount_point(): the compiled-in fs_mount_point */
++#include <string.h>               /* strlen/strncmp/memset/memcpy used below */
++#include <errno.h>                /* ENOENT for the host-passthrough fall-through */
++#include <tebako/fs/c_api.h>     /* modern libtfs C API (tebako_fs_*) */
++
++/* Route check: does the TFS mount table claim this path? (v2 multi-mount:
++   the driver mounts the env image at the runtime root AND each payload at
++   its declared point, so the v1 mount-point prefix check is replaced by the
++   c_api coverage query. A covered path the mounts do not hold answers
++   ENOENT from the c_api -- jail-gated host passthrough -- and the wrappers
++   below pass it through to the host fs.) */
++static int
++tfs_memfs_path_p(const char *path)
++{
++    if (path == NULL) return 0;
++    return tebako_path_is_embedded(path);
++}
++
++static int
++tfs_open(const char *path, int flags, ...)
++{
++    va_list ap;
++    mode_t mode = 0;
++    int fd;
++
++    if (tfs_memfs_path_p(path)) {
++        fd = tebako_fs_open(path, flags);
++        /* Held content answers in kind: a read open serves the fd, a write
++           open fails EROFS (the mounts are read-only -- bundler's
++           ProcessLock degradation rescues exactly that). ENOENT means the
++           mounts cover but do not hold the path -- a host path, and the
++           c_api has already jail-checked it: pass through to the host
++           open. */
++        if (fd >= 0 || errno != ENOENT) return fd;
++    }
++    va_start(ap, flags);
++    if (flags & O_CREAT) {
++        mode = (mode_t) va_arg(ap, int);
++    }
++    va_end(ap);
++    return open(path, flags, mode);
++}
++
++static ssize_t
++tfs_read(int fd, void *buf, size_t nbyte)
++{
++    if (tebako_fd_is_embedded(fd)) {
++        return tebako_fs_read(fd, buf, nbyte);
++    }
++    return read(fd, buf, nbyte);
++}
++
++/* libtfs c_api extension (requested): tebako_fs_pread -- a positional read
++   that does not move the file position; declared here so this translation
++   unit stays C99-clean meanwhile */
++ssize_t tebako_fs_pread(int fd, void *buf, size_t nbyte, off_t offset);
++
++static ssize_t
++tfs_pread(int fd, void *buf, size_t nbyte, off_t offset)
++{
++    if (tebako_fd_is_embedded(fd)) {
++        return tebako_fs_pread(fd, buf, nbyte, offset);
++    }
++    return pread(fd, buf, nbyte, offset);
++}
++
++static off_t
++tfs_lseek(int fd, off_t offset, int whence)
++{
++    if (tebako_fd_is_embedded(fd)) {
++        return tebako_fs_lseek(fd, offset, whence);
++    }
++    return lseek(fd, offset, whence);
++}
++
++static int
++tfs_close(int fd)
++{
++    if (tebako_fd_is_embedded(fd)) {
++        return tebako_fs_close(fd);
++    }
++    return close(fd);
++}
++
++static int
++tfs_fstat(int fd, struct stat *st)
++{
++    if (tebako_fd_is_embedded(fd)) {
++        /* the boundary buffer is the HOST type; convert the pinned
++           tebako_stat the c_api fills into it (SSOT: c_api.h) */
++        struct tebako_stat stb;
++        int rc = tebako_fs_fstat(fd, &stb);
++        if (rc == 0) {
++            memset(st, 0, sizeof(*st));
++            st->st_mode = stb.st_mode;
++            st->st_size = stb.st_size;
++            st->st_mtime = stb.st_mtime;
++            st->st_nlink = stb.st_nlink;
++        }
++        return rc;
++    }
++    return fstat(fd, st);
++}
++
++
++/* fcntl on a memfs fd: the memfs is read-only, so the flag state is
++   emulated (FD_CLOEXEC stored, status flags report O_RDONLY); calls on host
++   fds pass through to the real fcntl */
++static int
++tfs_fcntl(int fd, int cmd, ...)
++{
++    static int cloexec_flags;
++    va_list ap;
++    int arg = 0;
++
++    va_start(ap, cmd);
++    arg = va_arg(ap, int);
++    va_end(ap);
++
++    if (!tebako_fd_is_embedded(fd)) {
++        return fcntl(fd, cmd, arg);
++    }
++#ifndef F_GETFL
++#define F_GETFL 3 /* mingw: ruby's win32.h keeps F_GETFL inside #if 0 */
++#endif
++
++    switch (cmd) {
++    case F_GETFD:
++        return cloexec_flags;
++    case F_SETFD:
++        cloexec_flags = arg;
++        return 0;
++    case F_GETFL:
++        return O_RDONLY;
++    case F_SETFL:
++        return 0;
++    default:
++        errno = EINVAL;
++        return -1;
++    }
++}
++
++#ifdef HAVE_FCOPYFILE
++/* fcopyfile(3) on a memfs src fd: the kernel cannot see embedded fds (the
++   c_api hands out flagged virtual descriptors), so the copy is emulated as
++   a read/write loop. The dst fd is always a host fd -- the memfs is
++   read-only. The COPIED byte count is reported through the state, which
++   ruby's copy_stream reads back. */
++static int
++tfs_fcopyfile(int sfd, int dfd, copyfile_state_t state, copyfile_flags_t flags)
++{
++    char buf[65536];
++    off_t copied = 0;
++    ssize_t n;
++
++    if (!tebako_fd_is_embedded(sfd)) {
++        return fcopyfile(sfd, dfd, state, flags);
++    }
++    while ((n = tebako_fs_read(sfd, buf, sizeof(buf))) > 0) {
++        ssize_t done = 0;
++
++        while (done < n) {
++            ssize_t w = write(dfd, buf + done, (size_t)(n - done));
++            if (w < 0) {
++                if (errno == EINTR) continue;
++                return -1;
++            }
++            done += w;
++        }
++        copied += n;
++    }
++    if (n < 0) return -1;
++    if (state != NULL) copyfile_state_set(state, COPYFILE_STATE_COPIED, &copied);
++    return 0;
++}
++#endif
++#define open(...) tfs_open(__VA_ARGS__)
++#define read(...) tfs_read(__VA_ARGS__)
++#define pread(...) tfs_pread(__VA_ARGS__)
++#define lseek(...) tfs_lseek(__VA_ARGS__)
++#define close(...) tfs_close(__VA_ARGS__)
++#define fstat(...) tfs_fstat(__VA_ARGS__)
++#define fcntl(...) tfs_fcntl(__VA_ARGS__)
++#define fcopyfile(...) tfs_fcopyfile(__VA_ARGS__)
++/* -- End of tebako patch -- */
++
+ /* define system APIs */
+ #ifdef _WIN32
+ #undef open
+@@ -1351,7 +1538,13 @@ rb_io_read_memory(rb_io_t *fptr, void *buf, size_t count)
+ {
+     rb_thread_t *th = GET_THREAD();
+     VALUE scheduler = rb_fiber_scheduler_current_for_threadptr(th);
+-    if (scheduler != Qnil) {
++    /* tebako: the fiber-scheduler hook hands the fd to out-of-core code
++       (io-event's C extension) that issues raw libc calls on it; an
++       embedded (memfs) fd is a flagged virtual descriptor the kernel
++       does not know, so the hook dies EBADF. Embedded fds are served
++       synchronously by the in-process engine and never block -- skip
++       the dispatch and let the direct path below serve the op. */
++    if (scheduler != Qnil && !tebako_fd_is_embedded(fptr->fd)) {
+         VALUE result = rb_fiber_scheduler_io_read_memory(scheduler, fptr->self, buf, count, 0);
+ 
+         if (!UNDEF_P(result)) {
+@@ -1385,7 +1578,13 @@ rb_io_write_memory(rb_io_t *fptr, const void *buf, size_t count)
+ {
+     rb_thread_t *th = GET_THREAD();
+     VALUE scheduler = rb_fiber_scheduler_current_for_threadptr(th);
+-    if (scheduler != Qnil) {
++    /* tebako: the fiber-scheduler hook hands the fd to out-of-core code
++       (io-event's C extension) that issues raw libc calls on it; an
++       embedded (memfs) fd is a flagged virtual descriptor the kernel
++       does not know, so the hook dies EBADF. Embedded fds are served
++       synchronously by the in-process engine and never block -- skip
++       the dispatch and let the direct path below serve the op. */
++    if (scheduler != Qnil && !tebako_fd_is_embedded(fptr->fd)) {
+         VALUE result = rb_fiber_scheduler_io_write_memory(scheduler, fptr->self, buf, count, 0);
+ 
+         if (!UNDEF_P(result)) {
+@@ -1423,7 +1622,13 @@ rb_writev_internal(rb_io_t *fptr, const struct iovec *iov, int iovcnt)
+     rb_thread_t *th = GET_THREAD();
+ 
+     VALUE scheduler = rb_fiber_scheduler_current_for_threadptr(th);
+-    if (scheduler != Qnil) {
++    /* tebako: the fiber-scheduler hook hands the fd to out-of-core code
++       (io-event's C extension) that issues raw libc calls on it; an
++       embedded (memfs) fd is a flagged virtual descriptor the kernel
++       does not know, so the hook dies EBADF. Embedded fds are served
++       synchronously by the in-process engine and never block -- skip
++       the dispatch and let the direct path below serve the op. */
++    if (scheduler != Qnil && !tebako_fd_is_embedded(fptr->fd)) {
+         // This path assumes at least one `iov`:
+         VALUE result = rb_fiber_scheduler_io_write_memory(scheduler, fptr->self, iov[0].iov_base, iov[0].iov_len, 0);
+ 
+@@ -1497,7 +1702,13 @@ io_flush_buffer_async(VALUE arg)
+     rb_io_t *fptr = (rb_io_t *)arg;
+ 
+     VALUE scheduler = rb_fiber_scheduler_current();
+-    if (scheduler != Qnil) {
++    /* tebako: the fiber-scheduler hook hands the fd to out-of-core code
++       (io-event's C extension) that issues raw libc calls on it; an
++       embedded (memfs) fd is a flagged virtual descriptor the kernel
++       does not know, so the hook dies EBADF. Embedded fds are served
++       synchronously by the in-process engine and never block -- skip
++       the dispatch and let the direct path below serve the op. */
++    if (scheduler != Qnil && !tebako_fd_is_embedded(fptr->fd)) {
+         VALUE result = io_flush_buffer_fiber_scheduler(scheduler, fptr);
+         if (!UNDEF_P(result)) {
+             return result;
+@@ -1728,6 +1939,15 @@ rb_io_maybe_wait(int error, VALUE io, VALUE events, VALUE timeout)
+       case EWOULDBLOCK:
+ #endif
+       {
++        /* tebako: embedded (memfs) fds are served synchronously and
++           never block, so there is nothing to wait for -- answer
++           "ready" (the requested events) immediately instead of
++           dispatching to the fiber scheduler, whose hook issues raw
++           libc calls on a virtual descriptor the kernel does not know
++           (EBADF). */
++        if (tebako_fd_is_embedded(RFILE(io)->fptr->fd))
++            return events;
++
+         // The operation would block, so wait for the specified events:
+         VALUE result = rb_io_wait(io, events, timeout);
+         // The scheduler may change errno while waiting. Preserve the original
+@@ -3521,7 +3741,13 @@ io_read_memory_call(VALUE arg)
+     struct io_internal_read_struct *iis = (struct io_internal_read_struct *)arg;
+ 
+     VALUE scheduler = rb_fiber_scheduler_current();
+-    if (scheduler != Qnil) {
++    /* tebako: the fiber-scheduler hook hands the fd to out-of-core code
++       (io-event's C extension) that issues raw libc calls on it; an
++       embedded (memfs) fd is a flagged virtual descriptor the kernel
++       does not know, so the hook dies EBADF. Embedded fds are served
++       synchronously by the in-process engine and never block -- skip
++       the dispatch and let the direct path below serve the op. */
++    if (scheduler != Qnil && !tebako_fd_is_embedded(iis->fptr->fd)) {
+         VALUE result = rb_fiber_scheduler_io_read_memory(scheduler, iis->fptr->self, iis->buf, iis->capa, 0);
+ 
+         if (!UNDEF_P(result)) {
+@@ -5654,7 +5880,12 @@ fptr_finalize_flush(rb_io_t *fptr, int noraise, int keepgvl)
+     }
+ 
+     VALUE scheduler = rb_fiber_scheduler_current();
+-    if (!done && fd >= 0 && scheduler != Qnil) {
++    /* tebako: the scheduler's io_close hook would issue a raw close(2)
++       on the fd; an embedded (memfs) fd is a flagged virtual descriptor
++       the kernel does not know, so the hook dies EBADF, and a truthy
++       hook result would skip the wrapped close below, leaking the memfs
++       fd. (The 3.2-3.4 lines keep this dispatch commented out.) */
++    if (!done && fd >= 0 && scheduler != Qnil && !tebako_fd_is_embedded(fd)) {
+         VALUE result = rb_fiber_scheduler_io_close(scheduler, RB_INT2NUM(fd));
+ 
+         if (!UNDEF_P(result)) {
+@@ -6262,7 +6493,13 @@ pread_internal_call(VALUE _arg)
+     struct prdwr_internal_arg *arg = (struct prdwr_internal_arg *)_arg;
+ 
+     VALUE scheduler = rb_fiber_scheduler_current();
+-    if (scheduler != Qnil) {
++    /* tebako: the fiber-scheduler hook hands the fd to out-of-core code
++       (io-event's C extension) that issues raw libc calls on it; an
++       embedded (memfs) fd is a flagged virtual descriptor the kernel
++       does not know, so the hook dies EBADF. Embedded fds are served
++       synchronously by the in-process engine and never block -- skip
++       the dispatch and let the direct path below serve the op. */
++    if (scheduler != Qnil && !tebako_fd_is_embedded(arg->fd)) {
+         VALUE result = rb_fiber_scheduler_io_pread_memory(scheduler, arg->io->self, arg->offset, arg->buf, arg->count, 0);
+ 
+         if (!UNDEF_P(result)) {
+@@ -6353,7 +6590,13 @@ pwrite_internal_call(VALUE _arg)
+     struct prdwr_internal_arg *arg = (struct prdwr_internal_arg *)_arg;
+ 
+     VALUE scheduler = rb_fiber_scheduler_current();
+-    if (scheduler != Qnil) {
++    /* tebako: the fiber-scheduler hook hands the fd to out-of-core code
++       (io-event's C extension) that issues raw libc calls on it; an
++       embedded (memfs) fd is a flagged virtual descriptor the kernel
++       does not know, so the hook dies EBADF. Embedded fds are served
++       synchronously by the in-process engine and never block -- skip
++       the dispatch and let the direct path below serve the op. */
++    if (scheduler != Qnil && !tebako_fd_is_embedded(arg->fd)) {
+         VALUE result = rb_fiber_scheduler_io_pwrite_memory(scheduler, arg->io->self, arg->offset, arg->buf, arg->count, 0);
+ 
+         if (!UNDEF_P(result)) {
+@@ -12721,6 +12964,15 @@ nogvl_copy_file_range(struct copy_stream_struct *stp)
+     if (!S_ISREG(stp->src_stat.st_mode))
+         return 0;
+ 
++    /* tebako: copy_file_range(2) runs on the raw fds, but an embedded
++       (memfs) fd is a flagged virtual descriptor the kernel does not
++       know, so the syscall would fail EBADF -- skip the fast path and
++       fall through to the read/write loop (the same fallback as when
++       the syscall is absent). */
++    if (tebako_fd_is_embedded(stp->src_fptr->fd) ||
++        tebako_fd_is_embedded(stp->dst_fptr->fd))
++        return 0;
++
+     src_size = stp->src_stat.st_size;
+     src_offset = stp->src_offset;
+     if (src_offset >= (rb_off_t)0) {
+@@ -12945,6 +13197,13 @@ nogvl_copy_stream_sendfile(struct copy_stream_struct *stp)
+     if (!S_ISREG(stp->src_stat.st_mode))
+         return 0;
+ 
++    /* tebako: sendfile(2) has the same embedded-fd hazard as
++       copy_file_range(2) above -- fall through to the read/write
++       loop. */
++    if (tebako_fd_is_embedded(stp->src_fptr->fd) ||
++        tebako_fd_is_embedded(stp->dst_fptr->fd))
++        return 0;
++
+     src_size = stp->src_stat.st_size;
+ #ifndef __linux__
+     if ((stp->dst_stat.st_mode & S_IFMT) != S_IFSOCK)
