@@ -1,0 +1,23 @@
+# io_console_win32_vk_signature_msys_13.patch — the 3.3.13 body
+#
+# Target:  ext/io/console/win32_vk.inc (pass1 (msys))
+#
+# ruby 3.3.13's generated win32_vk.inc carries the fixed prototype itself
+# (`console_win32_vk(const char *, size_t)`), so the v1 patch — which
+# rewrote the broken `(/*const char *, unsigned int*/)` declaration — has
+# nothing left to change. The whole-line body still applies to 3.3.0-3.3.12;
+# this body keeps the feature selected without editing the declaration, and
+# leaves a marker saying why the edit stopped.
+diff --git a/ext/io/console/win32_vk.inc b/ext/io/console/win32_vk.inc
+index d15b121..7277331 100644
+--- a/ext/io/console/win32_vk.inc
++++ b/ext/io/console/win32_vk.inc
+@@ -512,6 +512,8 @@
+ #line 1 "win32_vk.list"
+ 
+ struct vktable {short ofs; unsigned short vk;};
++/* tebako: upstream carries the fixed prototype since 3.3.13 -- the v1
++   pass1 msys patch has nothing left to change on this line. */
+ static const struct vktable *console_win32_vk(const char *, size_t);
+ #line 5 "win32_vk.list"
+ struct vktable;

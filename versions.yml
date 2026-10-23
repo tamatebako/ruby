@@ -204,3 +204,11 @@ versions:
     url: https://cache.ruby-lang.org/pub/ruby/4.0/ruby-4.0.9.tar.gz
     sha256: c35350682ff050b79702d57ade4516e7336063f510155d19fb2fb5b3f3909511
     line: '4.0'
+  3.4.12:
+    url: https://cache.ruby-lang.org/pub/ruby/3.4/ruby-3.4.12.tar.gz
+    sha256: 5e5d85ad93b0adcccbad47733680f4892bd0078e3342437f7babce01c1872479
+    line: '3.4'
+  3.3.13:
+    url: https://cache.ruby-lang.org/pub/ruby/3.3/ruby-3.3.13.tar.gz
+    sha256: 4cae72e971bd1cdb20ca87d299111182417c5276c162de8ead0ab0531426cd61
+    line: '3.3'
