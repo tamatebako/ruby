@@ -35,6 +35,10 @@ patches:
   - feature: openssl_extconf_ruby_export_msys
     file: openssl_extconf_ruby_export_msys_10.patch
     version: "11"
+  # 3.4.12 adds the 4.0.0 have_func check; the _10 body still applies.
+  - feature: openssl_extconf_ruby_export_msys
+    file: openssl_extconf_ruby_export_msys_10.patch
+    version: "12"
   # clang (and cl.exe) reject digest.h's plain extern against digest.c's
   # dllexport definition under --with-static-linked-ext; upstream's macro
   # fix, carried for every 3.4.x (unshipped upstream, ruby/ruby d0e0f2af)
@@ -62,6 +66,10 @@ patches:
     file: io_c_shims_msys.patch
   - feature: io_c_tebako_includes
     file: io_c_tebako_includes.patch
+  # 3.4.12 carries the 4.0.8 rb_io_maybe_wait shape; refreshed body.
+  - feature: io_c_tebako_includes
+    file: io_c_tebako_includes_12.patch
+    version: "12"
   - feature: main_c_tebako_main
     file: main_c_tebako_main.patch
   - feature: process_c_tebako_spawn
@@ -95,6 +103,10 @@ patches:
   - feature: prism_compile_memfs
     file: prism_compile_memfs_6.patch
     version: "11"
+  # 3.4.12 keeps the version.h shape; the _6 body still applies.
+  - feature: prism_compile_memfs
+    file: prism_compile_memfs_6.patch
+    version: "12"
   - feature: ruby_c_fcntl_shim
     file: ruby_c_fcntl_shim.patch
   - feature: ruby_c_memfs_path_msys

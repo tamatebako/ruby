@@ -1,0 +1,6 @@
+# ruby 3.3.13 patch manifest (canonical tfs-ruby layout).
+# Carried forward by the release monitor (patches verified to apply to 3.3.13).
+version: "3.3.13"
+patches:
+  - feature: winmain_c_wwinmain_msys
+    file: ../3.2/winmain_c_wwinmain_msys_7.patch
