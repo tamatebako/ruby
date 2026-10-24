@@ -11,6 +11,8 @@
 # treat tebako memfs file descriptors as already-readable in rb_io_wait
 # (skip the cancelable wait; tebako_fd_is_embedded is the c_api FD
 # introspection).
+# Route check: tebako_fs_host_guard() widens the coverage answer under a
+# deniable policy (tamatebako/tebako#917), so uncovered paths are judged.
 # X-Redesign: modern-api
 diff --git a/io.c b/io.c
 index 1bfd39d..54d88d9 100644
@@ -42,7 +44,7 @@ index 1bfd39d..54d88d9 100644
 +tfs_memfs_path_p(const char *path)
 +{
 +    if (path == NULL) return 0;
-+    return tebako_path_is_embedded(path);
++    return tebako_path_is_embedded(path) || tebako_fs_host_guard();
 +}
 +
 +static int

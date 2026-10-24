@@ -80,6 +80,10 @@ int tebako_fs_stat(const char* path, struct tebako_stat* st);
 int tebako_fs_fstat(int fd, struct tebako_stat* st);
 
 int tebako_path_is_embedded(const char* path);
+/* 1 when the installed host-access policy judges an UNCOVERED path (deny or
+ * record), 0 otherwise: the IO shims widen their route check with it so a
+ * host path outside the mounts reaches the policy instead of the kernel. */
+int tebako_fs_host_guard(void);
 int tebako_fd_is_embedded(int fd);
 int tebako_get_errno(void);
 
