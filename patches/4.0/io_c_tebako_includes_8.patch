@@ -35,6 +35,8 @@
 # upstream on this line) skip the scheduler when the fd is embedded,
 # and the rb_io_maybe_wait funnel answers "ready" immediately instead
 # of waiting.
+# Route check: tebako_fs_host_guard() widens the coverage answer under a
+# deniable policy (tamatebako/tebako#917), so uncovered paths are judged.
 # X-Redesign: modern-api
 diff --git a/io.c b/io.c
 index 738bca9..2a14cea 100644
@@ -60,7 +62,7 @@ index 738bca9..2a14cea 100644
 +tfs_memfs_path_p(const char *path)
 +{
 +    if (path == NULL) return 0;
-+    return tebako_path_is_embedded(path);
++    return tebako_path_is_embedded(path) || tebako_fs_host_guard();
 +}
 +
 +static int

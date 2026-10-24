@@ -17,6 +17,8 @@
 # DIR emulation's dirp->nfiles directly, but a memfs dir handle is a libtfs
 # registry token, not a win32 DIR -- the unguarded read segfaults rubygems'
 # boot-time glob-scan of the memfs (tebako-runtime-ruby #114 windows legs).
+# Route check: tebako_fs_host_guard() widens the coverage answer under a
+# deniable policy (tamatebako/tebako#917), so uncovered paths are judged.
 # X-Redesign: modern-api
 diff --git a/dir.c b/dir.c
 index 96c1a45..3b8dcd6 100644
@@ -47,7 +49,7 @@ index 96c1a45..3b8dcd6 100644
 +tfs_memfs_path_p(const char *path)
 +{
 +    if (path == NULL) return 0;
-+    return tebako_path_is_embedded(path);
++    return tebako_path_is_embedded(path) || tebako_fs_host_guard();
 +}
 +
 +/* libtfs c_api extensions (requested): the dir-handle counterparts of the fd

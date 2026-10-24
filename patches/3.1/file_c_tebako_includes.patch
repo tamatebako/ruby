@@ -18,6 +18,8 @@
 # On msys the block also hooks flock: File#flock on a memfs fd
 # no-op-succeeds (the read-only memfs is process-local; the legacy msys
 # patch returned ENOTSUP there -- regression note in the hunk).
+# Route check: tebako_fs_host_guard() widens the coverage answer under a
+# deniable policy (tamatebako/tebako#917), so uncovered paths are judged.
 # X-Redesign: modern-api
 diff --git a/file.c b/file.c
 index e73ac53..73e481f 100644
@@ -49,7 +51,7 @@ index e73ac53..73e481f 100644
 +tfs_memfs_path_p(const char *path)
 +{
 +    if (path == NULL) return 0;
-+    return tebako_path_is_embedded(path);
++    return tebako_path_is_embedded(path) || tebako_fs_host_guard();
 +}
 +
 +#ifndef _WIN32
