@@ -19,6 +19,13 @@
 # boot-time glob-scan of the memfs (tebako-runtime-ruby #114 windows legs).
 # Route check: tebako_fs_host_guard() widens the coverage answer under a
 # deniable policy (tamatebako/tebako#917), so uncovered paths are judged.
+# Caveat (record policy): this helper also feeds the getattrlist
+# case-sensitivity and real-basename guards below, so on macOS a glob
+# against a HOST directory loses FNM_CASEFOLD while a record policy is
+# installed -- the guard answers 1 for a path the mounts do not cover.
+# Under deny the host directory is unreachable and the point is moot;
+# with no policy installed the predicate is coverage-only, so nothing
+# changes. Inert on msys, where HAVE_GETATTRLIST is never defined.
 # X-Redesign: modern-api
 diff --git a/dir.c b/dir.c
 index 96c1a45..3b8dcd6 100644

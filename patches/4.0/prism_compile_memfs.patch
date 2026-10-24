@@ -14,6 +14,11 @@
 # was defined -- the 2026-08-01 msys boot-smoke class). The in-mount
 # check is a mount-point prefix check vs the compiled-in fs_mount_point
 # (tebako_mount_point()).
+# Route check: tebako_fs_host_guard() widens the coverage answer under a
+# deniable policy (tamatebako/tebako#917), so a require/load of an uncovered
+# host path is judged here too. An allowed path still answers ENOENT from the
+# c_api, and pm_load_file's existing fall-through reads it through
+# pm_read_file, so an unguarded run behaves exactly as before.
 # X-Redesign: modern-api
 diff --git a/prism_compile.c b/prism_compile.c
 index 4b55775..860dd87 100644
@@ -44,7 +49,7 @@ index 4b55775..860dd87 100644
 +tfs_memfs_path_p(const char *path)
 +{
 +    if (path == NULL) return 0;
-+    return tebako_path_is_embedded(path);
++    return tebako_path_is_embedded(path) || tebako_fs_host_guard();
 +}
 +
 +/* Read a source file from the read-only memfs, composed on the modern c_api
