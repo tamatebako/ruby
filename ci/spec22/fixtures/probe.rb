@@ -70,5 +70,29 @@ probe("jail-deny") do
   end
 end
 
+# spec 22 §3.6: the exe shape's own file-IO family. The runtime exe
+# statically links libcrypto, whose cert reads call fopen64 directly — past
+# any loader interposition. A runtime built with the family linked (the
+# link unit's libtfs_preload.a) routes even those reads through the jail;
+# without it the read below silently SUCCEEDS, which is the hole. The
+# assertion is therefore "the host cert read is denied", never its error
+# class. ELF only: the exe shape's static preemption is an ELF mechanism,
+# and macOS's answer (§2's micro interpose-dylib gaining the family's
+# tuples) is its own later step.
+unless RUBY_PLATFORM.match?(/darwin/) || ENV["EXE_SHAPE_PROBE"] != "1"
+  probe("exe-shape-jail") do
+    require "openssl"
+    cert = Dir["/etc/ssl/certs/ca-certificates.crt", "/etc/ssl/certs/*.pem"].find { |p| File.file?(p) }
+    raise "no host cert to probe" unless cert
+
+    begin
+      OpenSSL::X509::Store.new.add_file(cert)
+      raise "HOLE: the in-exe libcrypto read #{cert} under TEBAKO_JAIL=deny"
+    rescue SystemCallError, OpenSSL::OpenSSLError
+      "denied"
+    end
+  end
+end
+
 $probe_results.each { |name, status, detail| puts "PROBE #{name} #{status} #{detail}" }
 exit($probe_results.all? { |_, status, _| status == "ok" } ? 0 : 1)
