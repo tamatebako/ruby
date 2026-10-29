@@ -57,6 +57,18 @@ rm -f "$PAYLOAD_IMG"
 
 echo "== the jailed proof (TEBAKO_JAIL=deny;\$SCRATCH:\$SCRATCH:rw) =="
 mkdir -p "$SCRATCH"/{probe-home,probe-tmp,tebako-home}
+# §3.6's transition gate: the exe-shape leg asserts only on a runtime
+# that LINKS the family — the driver arms it through
+# tebako_preload_init, which a family-carrying exe exports in its
+# dynamic symbol table (the factory's --export-dynamic). A pre-family
+# pin skips the leg loudly rather than failing the harness mid-roll.
+exe_shape_probe=0
+if nm -D "$RUNTIME_EXE" 2>/dev/null | grep -q tebako_preload_init; then
+  exe_shape_probe=1
+  echo "the runtime exports tebako_preload_init — the §3.6 leg asserts"
+else
+  echo "NOTE: this runtime carries no exe-shape family — the §3.6 leg skips (pre-#953 link unit)"
+fi
 set +e
 out="$(env -i \
   HOME="$SCRATCH/probe-home" \
@@ -64,6 +76,7 @@ out="$(env -i \
   PATH="/usr/bin:/bin" \
   TEBAKO_HOME="$SCRATCH/tebako-home" \
   TEBAKO_RUNTIME_IMAGE="$RUNTIME_IMAGE" \
+  EXE_SHAPE_PROBE="$exe_shape_probe" \
   TEBAKO_JAIL="deny;$SCRATCH:$SCRATCH:rw" \
   "$RUNTIME_EXE" --tebako-image "$PAYLOAD_IMG:-:/" --tebako-entry /probe/probe.rb 2>&1)"
 status=$?
@@ -73,5 +86,13 @@ echo "$out" | grep -q "^PROBE fiddle ok 42"            || { echo "FAIL spec22 (f
 echo "$out" | grep -q "^PROBE cext-self-dlopen ok 42"  || { echo "FAIL spec22 (cext self-dlopen leg)"; exit 1; }
 echo "$out" | grep -q "^PROBE named-error ok "         || { echo "FAIL spec22 (named-error leg)"; exit 1; }
 echo "$out" | grep -q "^PROBE jail-deny ok "           || { echo "FAIL spec22 (jail leg)"; exit 1; }
+if [ "$exe_shape_probe" = "1" ]; then
+  echo "$out" | grep -q "^PROBE exe-shape-jail ok "    || { echo "FAIL spec22 (exe-shape jail leg: the in-exe libcrypto read a host cert under TEBAKO_JAIL=deny — the runtime exports tebako_preload_init but the read still reached the host)"; exit 1; }
+  # §3.6's second half: the denial is journaled, not just raised. The
+  # jail-deny leg's /etc/passwd read is the same proof one level down
+  # (the interposed File.read), so the journal naming /etc/ssl names
+  # the exe shape's own denial specifically.
+  grep -q "/etc/ssl" "$SCRATCH/tebako-home/journal.log" || { echo "FAIL spec22 (the cert-read denial is not in the audit journal)"; exit 1; }
+fi
 [ "$status" -eq 0 ] || { echo "FAIL spec22 (probe exit $status)"; exit 1; }
 echo "SPEC22-ACCEPTANCE-OK $VERSION ($RUNTIME_EXE)"
