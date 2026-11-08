@@ -17,7 +17,17 @@
 # parent_start1).
 # Host targets pass through untouched; a covered path the mounts do not
 # hold answers ENOENT and exec fails honestly. Bare command names (PATH
-# search) do not resolve through the VFS. Shell-form spawns bridge their
+# search) do not resolve through the VFS.
+# A `chdir:` option naming an embedded directory is translated through
+# tebako_fs_exec_materialize_dir (tamatebako/ruby#152): a home-layout
+# mount answers the whole-tree twin; any other mount extracts the
+# subtree into the dl tmpdir. The verb is weak-externed — a runtime
+# linked against a link unit predating it passes the chdir through
+# untranslated (the pre-#152 honest ENOENT). The sass-embedded spawn
+# (Open3 of the in-image dart with chdir into the in-image lib/sass
+# dir) is the standing case (tebako-packages/metanorma#124's 1.18.4
+# legs: isodoc 3.7.12's render-time scss compile, triggered by the
+# strict font manifest read's substitution re-keying the font header). Shell-form spawns bridge their
 # in-VFS argument tokens parent-side to materialized host twins (spec 22
 # §3.1's shell-form rule — the windows §3.2 argv bridge's POSIX twin;
 # ruby-jing's `java -jar <in-image jar>` is the standing case): the
@@ -72,10 +82,10 @@
 # inline and the string is spliced with the planned boot.
 # X-Redesign: v2-spawn
 diff --git a/process.c b/process.c
-index 97fa336..f55697e 100644
+index 0535b72..d0f008c 100644
 --- a/process.c
 +++ b/process.c
-@@ -2834,6 +2834,856 @@ rb_execarg_get(VALUE execarg_obj)
+@@ -2651,6 +2651,907 @@ rb_execarg_get(VALUE execarg_obj)
      return eargp;
  }
  
@@ -129,6 +139,19 @@ index 97fa336..f55697e 100644
 +   has no weak externs): the factory's link-unit pin (>= v2.1.0)
 +   always carries the symbol, so a mismatch fails the build loudly,
 +   never degrades silently at run time. */
++/* The chdir verb is NEWER than the exe verb: runtimes linked against a
++   link unit predating it carry no such symbol — weak extern, and the
++   chdir then passes through untranslated (the pre-#152 honest ENOENT).
++   Windows links STRONG (the factory's link-unit pin carries it). */
++extern char *tebako_fs_exec_materialize_dir(const char *path)
++#if defined(__APPLE__)
++    __attribute__((weak_import));
++#elif defined(_WIN32)
++    ;
++#else
++    __attribute__((weak));
++#endif
++
 +extern int tebako_spawn_runtime_plan(const char *command,
 +                                     const char *args_packed, size_t args_len,
 +                                     char **out_exe,
@@ -519,6 +542,25 @@ index 97fa336..f55697e 100644
 +    prog = RSTRING_PTR(eargp->invoke.cmd.command_name);
 +    if (prog == NULL) return;
 +
++    /* The chdir option's own translation (tamatebako/ruby#152): an
++       in-image chdir dies in the child before the exec — the VFS is
++       not the kernel. tebako_fs_exec_materialize_dir answers the dir's
++       host twin (a home-layout mount's whole-tree pull, or the subtree
++       extracted into the dl tmpdir); the verb is weak-externed — an old
++       link unit passes the chdir through (the pre-#152 honest ENOENT). */
++    if (RB_TYPE_P(eargp->chdir_dir, T_STRING)) {
++        const char *cd = RSTRING_PTR(eargp->chdir_dir);
++        if (tebako_path_is_embedded(cd)) {
++            char *cdtwin = tebako_fs_exec_materialize_dir != NULL
++                ? tebako_fs_exec_materialize_dir(cd)
++                : NULL;
++            if (cdtwin != NULL) {
++                eargp->chdir_dir = rb_str_new_cstr(cdtwin);
++                free(cdtwin);
++            }
++        }
++    }
++
 +    /* The plan head runs BEFORE the platform scrub and the VFS flow:
 +       a planned bare name retargets to the store's runtime exe, and a
 +       named error must never fall through to a host binary of the same
@@ -875,6 +917,25 @@ index 97fa336..f55697e 100644
 +static void
 +tfs_spawn_prepare(struct rb_execarg *eargp)
 +{
++    /* The chdir option's own translation (tamatebako/ruby#152): an
++       in-image chdir dies in the child before the exec — the VFS is
++       not the kernel. tebako_fs_exec_materialize_dir answers the dir's
++       host twin (a home-layout mount's whole-tree pull, or the subtree
++       extracted into the dl tmpdir); the verb is weak-externed — an old
++       link unit passes the chdir through (the pre-#152 honest ENOENT). */
++    if (RB_TYPE_P(eargp->chdir_dir, T_STRING)) {
++        const char *cd = RSTRING_PTR(eargp->chdir_dir);
++        if (tebako_path_is_embedded(cd)) {
++            char *cdtwin = tebako_fs_exec_materialize_dir != NULL
++                ? tebako_fs_exec_materialize_dir(cd)
++                : NULL;
++            if (cdtwin != NULL) {
++                eargp->chdir_dir = rb_str_new_cstr(cdtwin);
++                free(cdtwin);
++            }
++        }
++    }
++
 +    /* Shell form: the exposed-command plan inline (spec 30 §3 —
 +       windows has no launcher tier), the plain token bridge
 +       otherwise. */
@@ -932,7 +993,7 @@ index 97fa336..f55697e 100644
  static VALUE
  rb_execarg_init(int argc, const VALUE *orig_argv, int accept_shell, VALUE execarg_obj)
  {
-@@ -2846,6 +3225,9 @@ rb_execarg_init(int argc, const VALUE *orig_argv, int accept_shell, VALUE execar
+@@ -2663,6 +3564,9 @@ rb_execarg_init(int argc, const VALUE *orig_argv, int accept_shell, VALUE execar
      prog = rb_exec_getargs(&argc, &argv, accept_shell, &env, &opthash);
      rb_exec_fillarg(prog, argc, argv, env, opthash, execarg_obj);
      ALLOCV_END(argv_buf);
