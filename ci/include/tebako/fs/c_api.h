@@ -89,6 +89,7 @@ int tebako_get_errno(void);
 
 char* tebako_fs_dlmap2file(const char* path);
 char* tebako_fs_exec_materialize(const char* path);
+char* tebako_fs_exec_materialize_dir(const char* path);
 char* tebako_fs_mounts(void);
 char* tebako_fs_mount_of(const char* path);
 
