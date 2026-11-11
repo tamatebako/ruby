@@ -84,6 +84,12 @@ int tebako_path_is_embedded(const char* path);
  * record), 0 otherwise: the IO shims widen their route check with it so a
  * host path outside the mounts reaches the policy instead of the kernel. */
 int tebako_fs_host_guard(void);
+/* The spec 08 §5 platform spawn boundary (tebako#1021): 1 when an
+ * UNPLANNED spawned host child may run — a constant 1 on POSIX (the
+ * preload tier judges the child), on windows 1 only while the bound host
+ * policy is trivially open; the spawn hook refuses the spawn with
+ * Errno::EPERM under any non-trivial windows jail. */
+int tebako_fs_spawn_host_permitted(void);
 int tebako_fd_is_embedded(int fd);
 int tebako_get_errno(void);
 
