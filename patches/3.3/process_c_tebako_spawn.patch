@@ -65,14 +65,14 @@
 # IS the surface (no launcher tier) — an exposed command token plans
 # inline and the string is spliced with the planned boot.
 # X-Redesign: v2-spawn
-diff --git a/process.c b/process.c
-index 97fa336..f55697e 100644
 --- a/process.c
 +++ b/process.c
-@@ -2834,6 +2834,818 @@ rb_execarg_get(VALUE execarg_obj)
+@@ -2744,8 +2744,855 @@
+     struct rb_execarg *eargp;
+     TypedData_Get_Struct(execarg_obj, struct rb_execarg, &exec_arg_data_type, eargp);
      return eargp;
- }
- 
++}
++
 +
 +/* -- Start of tebako patch -- */
 +#include <tebako/fs/c_api.h>     /* modern libtfs C API (tebako_fs_*) */
@@ -498,6 +498,24 @@ index 97fa336..f55697e 100644
 +    char *preload;
 +    char *mounts;
 +
++    /* The chdir option names the directory the child enters BEFORE the
++       exec — posix_spawn's chdir is a file action the preload never
++       sees, and the fork path's chdir(2) runs where the mount points do
++       not exist on the host. An in-image target translates parent-side
++       to its host twin (the tfs subtree verb the link unit exports since
++       v2.8.74); a covered-but-unheld target keeps its spelling — the
++       child answers honestly. */
++    if (RB_TYPE_P(eargp->chdir_dir, T_STRING)) {
++        const char *chdir = RSTRING_PTR(eargp->chdir_dir);
++        if (tebako_path_is_embedded(chdir)) {
++            char *twin = tebako_fs_exec_materialize_dir(chdir);
++            if (twin != NULL) {
++                eargp->chdir_dir = hide_obj(rb_str_new_cstr(twin));
++                free(twin);
++            }
++        }
++    }
++
 +    /* Shell form (all POSIX): bridge the argument tokens, keep the
 +       host's shell. The darwin scrub is unchanged (tebako#448's
 +       /bin/sh rule — the shell is always a restricted target). */
@@ -698,8 +716,8 @@ index 97fa336..f55697e 100644
 +    tfs_bridge_span(out, s, 0, slen, &dirty);
 +    if (dirty) *strp = out;
 +    RB_GC_GUARD(out);
-+}
-+
+ }
+ 
 +/* The windows shell form IS the spawn surface (spec 30 §3: no
 +   launcher tier): when the command token — the first token, one
 +   quote layer stripped — names an EXPOSED command, plan it (no
@@ -849,6 +867,23 @@ index 97fa336..f55697e 100644
 +static void
 +tfs_spawn_prepare(struct rb_execarg *eargp)
 +{
++
++    /* The chdir option names the directory the child enters BEFORE the
++       exec — CreateProcess's lpCurrentDirectory resolves on the host,
++       where the mount points do not exist. An in-image target
++       translates parent-side to its host twin (the tfs subtree verb the
++       link unit exports since v2.8.74); a covered-but-unheld target
++       keeps its spelling — the child answers honestly. */
++    if (RB_TYPE_P(eargp->chdir_dir, T_STRING)) {
++        const char *chdir = RSTRING_PTR(eargp->chdir_dir);
++        if (tebako_path_is_embedded(chdir)) {
++            char *twin = tebako_fs_exec_materialize_dir(chdir);
++            if (twin != NULL) {
++                eargp->chdir_dir = hide_obj(rb_str_new_cstr(twin));
++                free(twin);
++            }
++        }
++    }
 +    /* Shell form: the exposed-command plan inline (spec 30 §3 —
 +       windows has no launcher tier), the plain token bridge
 +       otherwise. */
@@ -888,7 +923,7 @@ index 97fa336..f55697e 100644
  static VALUE
  rb_execarg_init(int argc, const VALUE *orig_argv, int accept_shell, VALUE execarg_obj)
  {
-@@ -2846,6 +3221,9 @@ rb_execarg_init(int argc, const VALUE *orig_argv, int accept_shell, VALUE execar
+@@ -2758,6 +3605,9 @@
      prog = rb_exec_getargs(&argc, &argv, accept_shell, &env, &opthash);
      rb_exec_fillarg(prog, argc, argv, env, opthash, execarg_obj);
      ALLOCV_END(argv_buf);
