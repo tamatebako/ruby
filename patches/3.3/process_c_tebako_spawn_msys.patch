@@ -19,10 +19,10 @@
 #
 # The design notes live in the neutral patch's header.
 diff --git a/process.c b/process.c
-index 97fa336..f55697e 100644
+index aff3503..f3a5d3b 100644
 --- a/process.c
 +++ b/process.c
-@@ -2834,6 +2834,852 @@ rb_execarg_get(VALUE execarg_obj)
+@@ -2746,6 +2746,964 @@ rb_execarg_get(VALUE execarg_obj)
      return eargp;
  }
  
@@ -66,6 +66,40 @@ index 97fa336..f55697e 100644
 +    rb_ary_push(env, hide_obj(rb_assoc_new(EXPORT_STR(rb_str_new_cstr(key)),
 +                                           Qnil)));
 +}
++
++/* The chdir verb is NEWER than the exe verb: runtimes linked against a
++   link unit predating it carry no such symbol — weak extern, and the
++   chdir then passes through untranslated (the pre-#152 honest ENOENT).
++   Windows links STRONG (the factory's link-unit pin carries it). */
++extern char *tebako_fs_exec_materialize_dir(const char *path)
++#if defined(__APPLE__)
++    __attribute__((weak_import));
++#elif defined(_WIN32)
++    ;
++#else
++    __attribute__((weak));
++#endif
++
++/* spec 08 §5's platform spawn boundary (tebako#1021), carried by the
++   link unit beside the chdir verb: POSIX answers a constant 1 — the
++   preload tier inherits into the child and judges the exec target; a
++   windows runtime answers 1 exactly while the bound host policy is
++   TRIVIALLY OPEN and 0 under any non-trivial one, where the unplanned
++   host child is refused by name. WEAK where the platform allows: a
++   runtime linked against a pre-v2.8.77 link unit carries no such
++   symbol — the reference reads NULL and every spawn passes through
++   exactly as before (the honest pre-fix behavior the conformance
++   suite's known-gap row names). Windows links STRONG (the factory's
++   link-unit pin >= v2.8.77 always carries the symbol): a mismatch
++   fails the build loudly, never degrades silently at run time. */
++extern int tebako_fs_spawn_host_permitted(void)
++#if defined(__APPLE__)
++    __attribute__((weak_import));
++#elif defined(_WIN32)
++    ;
++#else
++    __attribute__((weak));
++#endif
 +
 +/* spec 30 §2's spawned-runtime planner, exported by the driver
 +   (tebako-driver ffi.rs; exports.txt owns the surface). WEAK where
@@ -200,6 +234,24 @@ index 97fa336..f55697e 100644
 +    free(argv);
 +    free(env);
 +    return 1;
++}
++
++/* The spawn boundary gate (spec 08 §5, tebako#1021): every spawn the
++   plan head passed through is an UNPLANNED host child. POSIX never
++   refuses — the preload tier inherits into the child and judges the
++   exec target, so the verb is a constant permit there (and a
++   pre-v2.8.77 link unit reads the weak extern as NULL: every spawn
++   passes through exactly as before). A windows runtime under any
++   non-trivial host policy refuses the spawn by name — IO.popen,
++   system and backticks raise Errno::EPERM, the conformance probe's
++   DENIED:EPERM ("blocked"). */
++static void
++tfs_spawn_host_boundary(const char *prog)
++{
++    if (tebako_fs_spawn_host_permitted == NULL ||
++        tebako_fs_spawn_host_permitted() != 0)
++        return;
++    rb_syserr_fail_path(EPERM, rb_str_new_cstr(prog));
 +}
 +
 +#ifndef _WIN32
@@ -453,7 +505,12 @@ index 97fa336..f55697e 100644
 +       host's shell. The darwin scrub is unchanged (tebako#448's
 +       /bin/sh rule — the shell is always a restricted target). */
 +    if (eargp->use_shell) {
++        /* tebako#1021: a shell spawn is always an unplanned host child —
++           the POSIX verb is a constant permit (the preload tier judges
++           the shell's own children); the gate is the windows refusal. */
++        tfs_spawn_host_boundary("sh");
 +        tfs_bridge_cmdline(&eargp->invoke.sh.shell_script);
++
 +#if defined(__APPLE__)
 +        if (tfs_spawn_target_restricted(eargp)) {
 +            tfs_env_unset(eargp, "DYLD_INSERT_LIBRARIES");
@@ -465,6 +522,25 @@ index 97fa336..f55697e 100644
 +    if (!RB_TYPE_P(eargp->invoke.cmd.command_name, T_STRING)) return;
 +    prog = RSTRING_PTR(eargp->invoke.cmd.command_name);
 +    if (prog == NULL) return;
++
++    /* The chdir option's own translation (tamatebako/ruby#152): an
++       in-image chdir dies in the child before the exec — the VFS is
++       not the kernel. tebako_fs_exec_materialize_dir answers the dir's
++       host twin (a home-layout mount's whole-tree pull, or the subtree
++       extracted into the dl tmpdir); the verb is weak-externed — an old
++       link unit passes the chdir through (the pre-#152 honest ENOENT). */
++    if (RB_TYPE_P(eargp->chdir_dir, T_STRING)) {
++        const char *cd = RSTRING_PTR(eargp->chdir_dir);
++        if (tebako_path_is_embedded(cd)) {
++            char *cdtwin = tebako_fs_exec_materialize_dir != NULL
++                ? tebako_fs_exec_materialize_dir(cd)
++                : NULL;
++            if (cdtwin != NULL) {
++                eargp->chdir_dir = rb_str_new_cstr(cdtwin);
++                free(cdtwin);
++            }
++        }
++    }
 +
 +    /* The plan head runs BEFORE the platform scrub and the VFS flow:
 +       a planned bare name retargets to the store's runtime exe, and a
@@ -499,7 +575,13 @@ index 97fa336..f55697e 100644
 +        if (tfs_spawn_plan_head(eargp, prog, args, args_len)) return;
 +    }
 +
++    /* tebako#1021: the plan head passed this spawn through — an
++       unplanned host child, judged inside the child on POSIX and
++       refused here only under a non-trivial windows jail. */
++    tfs_spawn_host_boundary(prog);
++
 +#if defined(__APPLE__)
++
 +    /* The scrub: a restricted target dies under the inherited variable
 +       at exec, before the VFS flow below could matter. */
 +    if (tfs_spawn_target_restricted(eargp)) {
@@ -727,17 +809,23 @@ index 97fa336..f55697e 100644
 +    cmd[tlen] = '\0';
 +    rc = tebako_spawn_runtime_plan(cmd, NULL, 0, &exe, &argv, &argv_len,
 +                                   &env, &env_len, &err);
-+    free(cmd);
 +    if (rc < 0) {
 +        VALUE msg = rb_str_new_cstr(err != NULL ? err
 +                                    : "spawn plan failed without a message");
++        free(cmd);
 +        free(err);
 +        rb_exc_raise(rb_exc_new_str(rb_eRuntimeError, msg));
 +    }
 +    if (rc != 1) {
++        /* tebako#1021: the shell form IS the windows spawn surface — an
++           unplanned command token runs plain-host, so the boundary
++           refuses it here under any non-trivial jail. */
++        tfs_spawn_host_boundary(cmd);
++        free(cmd);
 +        tfs_bridge_cmdline(strp);
 +        return;
 +    }
++    free(cmd);
 +
 +    out = rb_str_buf_new(slen + (long)argv_len + 32);
 +    rb_str_buf_cat(out, s, b);            /* the leading blanks */
@@ -818,6 +906,25 @@ index 97fa336..f55697e 100644
 +static void
 +tfs_spawn_prepare(struct rb_execarg *eargp)
 +{
++    /* The chdir option's own translation (tamatebako/ruby#152): an
++       in-image chdir dies in the child before the exec — the VFS is
++       not the kernel. tebako_fs_exec_materialize_dir answers the dir's
++       host twin (a home-layout mount's whole-tree pull, or the subtree
++       extracted into the dl tmpdir); the verb is weak-externed — an old
++       link unit passes the chdir through (the pre-#152 honest ENOENT). */
++    if (RB_TYPE_P(eargp->chdir_dir, T_STRING)) {
++        const char *cd = RSTRING_PTR(eargp->chdir_dir);
++        if (tebako_path_is_embedded(cd)) {
++            char *cdtwin = tebako_fs_exec_materialize_dir != NULL
++                ? tebako_fs_exec_materialize_dir(cd)
++                : NULL;
++            if (cdtwin != NULL) {
++                eargp->chdir_dir = rb_str_new_cstr(cdtwin);
++                free(cdtwin);
++            }
++        }
++    }
++
 +    /* Shell form: the exposed-command plan inline (spec 30 §3 —
 +       windows has no launcher tier), the plain token bridge
 +       otherwise. */
@@ -858,7 +965,12 @@ index 97fa336..f55697e 100644
 +            }
 +        }
 +        if (tfs_spawn_plan_head(eargp, prog, args, args_len)) return;
++        /* tebako#1021: a pass-through is an unplanned host child — no
++           injection tier judges it on windows, so the boundary refuses
++           it here under any non-trivial jail. */
++        tfs_spawn_host_boundary(prog);
 +        if (tebako_path_is_embedded(prog)) {
++
 +            char *mapped = tebako_fs_exec_materialize(prog);
 +            if (mapped != NULL) {
 +                eargp->invoke.cmd.command_name = rb_str_new_cstr(mapped);
@@ -875,7 +987,7 @@ index 97fa336..f55697e 100644
  static VALUE
  rb_execarg_init(int argc, const VALUE *orig_argv, int accept_shell, VALUE execarg_obj)
  {
-@@ -2846,6 +3221,9 @@ rb_execarg_init(int argc, const VALUE *orig_argv, int accept_shell, VALUE execar
+@@ -2758,6 +3716,9 @@ rb_execarg_init(int argc, const VALUE *orig_argv, int accept_shell, VALUE execar
      prog = rb_exec_getargs(&argc, &argv, accept_shell, &env, &opthash);
      rb_exec_fillarg(prog, argc, argv, env, opthash, execarg_obj);
      ALLOCV_END(argv_buf);
