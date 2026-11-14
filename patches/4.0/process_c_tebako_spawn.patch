@@ -94,7 +94,7 @@ diff --git a/process.c b/process.c
 index 2f7d9e4..347e566 100644
 --- a/process.c
 +++ b/process.c
-@@ -2662,6 +2662,968 @@ rb_execarg_get(VALUE execarg_obj)
+@@ -2662,6 +2662,977 @@ rb_execarg_get(VALUE execarg_obj)
      return eargp;
  }
  
@@ -604,13 +604,22 @@ index 2f7d9e4..347e566 100644
 +    if (RB_TYPE_P(eargp->chdir_dir, T_STRING)) {
 +        const char *cd = RSTRING_PTR(eargp->chdir_dir);
 +        if (tebako_path_is_embedded(cd)) {
-+            char *cdtwin = tebako_fs_exec_materialize_dir != NULL
-+                ? tebako_fs_exec_materialize_dir(cd)
-+                : NULL;
-+            if (cdtwin != NULL) {
-+                eargp->chdir_dir = rb_str_new_cstr(cdtwin);
-+                free(cdtwin);
++            if (tebako_fs_exec_materialize_dir != NULL) {
++                char *cdtwin = tebako_fs_exec_materialize_dir(cd);
++                if (cdtwin != NULL) {
++                    eargp->chdir_dir = rb_str_new_cstr(cdtwin);
++                    free(cdtwin);
++                } else {
++                    /* the verb answered NULL for an embedded path — the
++                       materialization failed in the parent; name it with
++                       the verb's errno rather than die a bare ENOENT in
++                       the child (tamatebako/ruby#157) */
++                    int e = errno;
++                    rb_syserr_fail_path(e, eargp->chdir_dir);
++                }
 +            }
++            /* a pre-#152 link unit carries no verb: the documented
++               passthrough — the child answers the honest ENOENT. */
 +        }
 +    }
 +
