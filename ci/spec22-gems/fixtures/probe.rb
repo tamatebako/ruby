@@ -38,6 +38,13 @@
 #                      flag raw-loader matrix) run WITHOUT the require
 #                      attempt, so the loader starts pristine. windows
 #                      only (POSIX prints a skip line). Expected GREEN.
+#   ssl-certs        — ruby#387: the bundled CA pems load into rubygems'
+#                      HTTPS trust store through ruby's VFS-routed IO
+#                      (jailed, no network; the pre-patch failure fired at
+#                      cert-store configuration, before any fetch). The
+#                      native twin (add_file on the same in-image path)
+#                      must still fail closed — the mechanism oracle.
+#                      Expected GREEN + the pinned native signature.
 #
 # Every invocation prints the instrumentation line
 # `PROBE gem-loaded yes|no` first — whether a tebako-runtime gem got
@@ -430,7 +437,44 @@ when "sassc-matrix"
   else
     puts "PROBE sassc-matrix skipped (posix)"
   end
+when "ssl-certs"
+  # ruby#387: rubygems' HTTPS trust store must load the bundled CA pems
+  # through ruby's VFS-routed IO — never through libcrypto's host fopen,
+  # which misses the in-image paths and bypasses the jail router entirely.
+  # Jailed; no network — the pre-patch failure fired at cert-store
+  # configuration (StoreError out of HTTPSPool#setup_connection), before
+  # any fetch. Expected GREEN post-patch.
+  require "rubygems/openssl"
+  require "rubygems/request"
+
+  cert_files = Gem::Request.get_cert_files
+  if cert_files.empty?
+    puts "PROBE ssl-certs fail get_cert_files empty (the dir shim should serve the in-image pems)"
+    exit 1
+  end
+  unreadable = cert_files.reject { |f| File.readable?(f) }
+  unless unreadable.empty?
+    puts "PROBE ssl-certs fail unreadable through File IO: #{unreadable.join(',')}"
+    exit 1
+  end
+
+  conn = Gem::Net::HTTP.new("rubygems.org", 443)
+  Gem::Request.configure_connection_for_https(conn, cert_files)
+  puts "PROBE ssl-certs ok certs=#{cert_files.length} store-configured"
+
+  # The mechanism oracle (the sassc-partial-unmaterialized shape): the
+  # native route must STILL fail closed on the same in-image path — an
+  # unexpected-ok means the leg above passed because the pem became
+  # host-real (a mount bridge or an exec-cache leak), not because the
+  # read rode the VFS.
+  begin
+    OpenSSL::X509::Store.new.add_file(cert_files.first)
+    puts "PROBE ssl-certs-native unexpected-ok (in-image pem is host-real — attribution broken)"
+    exit 1
+  rescue OpenSSL::X509::StoreError => e
+    puts "PROBE ssl-certs-native expected-fail #{e.class}: #{e.message.lines.first.to_s.strip}"
+  end
 else
-  warn "probe.rb: unknown leg #{ARGV[0].inspect} (sinatra-fixed|sinatra-unfixed|sassc|sassc-unmaterialized|sassc-matrix)"
+  warn "probe.rb: unknown leg #{ARGV[0].inspect} (sinatra-fixed|sinatra-unfixed|sassc|sassc-unmaterialized|sassc-matrix|ssl-certs)"
   exit 64
 end

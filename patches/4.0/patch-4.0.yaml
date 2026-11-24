@@ -65,6 +65,8 @@ patches:
     file: digest_h_wrap_metadata_linkage_msys.patch
   - feature: rubygems_openssl_require
     file: ../3.1/rubygems_openssl_require.patch
+  - feature: rubygems_ssl_certs_vfs_read
+    file: ../3.1/rubygems_ssl_certs_vfs_read.patch
   - feature: thread_pthread_main_stack_musl
     file: thread_pthread_main_stack_musl.patch
   # win32_clock_rename_msys intentionally absent on 4.0: ruby's win32.h now

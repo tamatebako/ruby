@@ -30,6 +30,8 @@ dogfood job runs it against CI-built artifacts; see the last section.)
 | `sassc-main` | **GREEN** | `SassC::Engine.new(File.read("/probe/styles/plain.scss"))` — no imports: ruby's patched IO reads the VFS file, libsass compiles the string; the CSS carries the rule. Nothing touches a host path |
 | `sassc-partial` | **GREEN** (since class R landed) | `SassC::Engine.new(…, filename:, load_paths:)` with `@import "partials/thing"` run against the **materialized** styles tree: the payload manifest declares `materialize:` for `main.scss` + `partials/_thing.scss` (spec 22 §4), the driver extracts them to `<TEBAKO_EXEC_CACHE>/resources/<image-key>/…` at boot, and libsass's C++ importer `fopen()`s REAL host paths (the exec cache lives under the harness scratch, which the jail grants rw). The probe asserts the partial's own rule (`.spec22-gems-thing`, `#c0392b`) is in the CSS |
 | `sassc-partial-unmaterialized` | **expected RED** | the SAME import run against the **negative-oracle image** — the same probe tree pressed with a manifest identical except for the absent `materialize:` key. The importer's `fopen()` of `/probe/styles/partials/_thing.scss` is not host-real and the engine raises `SassC::SyntaxError: Error: File to import not found or unreadable: partials/thing.` (pinned). This is the **class-R mechanism oracle** |
+| `ssl-certs` | **GREEN** (since ruby#387) | rubygems' HTTPS trust store loads the bundled CA pems (`Gem::Request.get_cert_files` → in-image `ssl_certs/*.pem`) through ruby's VFS-routed IO — jailed, no network (the pre-patch failure fired at cert-store configuration, `OpenSSL::X509::StoreError: X509_LOOKUP_load_file` out of `HTTPSPool#setup_connection`, before any fetch). `configure_connection_for_https` on a fresh `Gem::Net::HTTP` must complete |
+| `ssl-certs-native` | **expected RED** | the mechanism oracle: `OpenSSL::X509::Store.new.add_file` on the SAME in-image pem must keep raising the pinned `X509_LOOKUP_load_file` StoreError — libcrypto's host `fopen()` never sees the VFS. An unexpected GREEN means the ssl-certs verdict came from a host-real pem (a mount bridge or exec-cache leak), not from the VFS read |
 
 ### The class-R flip contract
 
@@ -80,11 +82,13 @@ interpreter exe lives outside the image). The harness therefore:
    grants `mount_root_override`, so the setup invocation redirects the
    mount root to a host-real copy of the pressed layout tree **plus** the
    stash `include/` headers and a `bin/ruby` hardlink to the runtime exe.
-   Two build-time consumers need this — both are spec 22 class R shaped
-   (native code reading raw host paths): rubygems' HTTPS fetcher
-   (`OpenSSL::X509::Store#add_file` on the in-image `ssl_certs/*.pem`)
-   and mkmf's spawned clang (the image ships no `include/`, and VFS paths
-   are not host-real). The `bin/ruby` hardlink exists because rubygems
+   mkmf's spawned clang needs this — spec 22 class R shaped (native code
+   reading raw host paths: the image ships no `include/`, and VFS paths
+   are not host-real). rubygems' HTTPS fetcher used to be the second such
+   consumer (`OpenSSL::X509::Store#add_file` on the in-image
+   `ssl_certs/*.pem`) until ruby#387 routed that read through ruby's
+   VFS-aware File IO — the `ssl-certs` proof leg keeps it there. The
+   `bin/ruby` hardlink exists because rubygems
    respawns `RbConfig.ruby` (`<prefix>/bin/ruby`) for every extconf; with
    no `--tebako-*` flags the driver falls through to a plain interpreter
    boot and ruby's patched IO opens the host-side extconf via host
@@ -101,8 +105,9 @@ interpreter exe lives outside the image). The harness therefore:
    — the materialized image and the negative-oracle image, same tree.
 
 The two classic-style sinatra apps share `Sinatra::Application` state by
-definition, so the harness runs **four** jailed invocations
-(sinatra-fixed, sinatra-unfixed, sassc, sassc-unmaterialized) instead of
+definition, so the harness runs **five** jailed invocations
+(sinatra-fixed, sinatra-unfixed, sassc, sassc-unmaterialized, ssl-certs)
+instead of
 ci/spec22's one; the jail and `env -i` shape are identical in each. The
 bridge (`TEBAKO_MOUNT_ROOT` redirect) is used **only** by the un-jailed
 setup leg — the proof legs boot the runtime stock.
@@ -158,7 +163,7 @@ but no state.
 
 `run-msys.sh` is the same acceptance on windows (spec 22 §8's last row:
 the suite green with the gem gone on **every** published platform). Same
-fixtures, the same four jailed proof legs plus a fifth forensic one
+fixtures, the same five jailed proof legs plus a sixth forensic one
 (`sassc-matrix` — the incident-13 diag sheet on a pristine loader: the
 sha256 legs, the ffi solo loads, the spelling × flag raw-loader matrix;
 never gates), same pinned PROBE lines — but it builds
@@ -197,7 +202,7 @@ The windows-specific mechanics the leg owns:
   behaviors: the era-2 msys rbconfig already spells
   `ENV["TEBAKO_MOUNT_ROOT"] || 'A:/t'` (unset → the baked root), and
   `subst A: <bridge-parent>` makes `A:\t` host-real for the leg's
-  duration — raw C opens (OpenSSL's cert `fopen`, the spawned gcc's
+  duration — raw C opens (the spawned gcc's
   `-I`/`-L`) read the bridge through the alias, and rubygems' per-extconf
   respawn of `A:/t/bin/ruby.exe` plain-boots the bridge's exe copy, whose
   LOAD_RELATIVE load paths self-root at `A:/t`. The bridge tree itself is

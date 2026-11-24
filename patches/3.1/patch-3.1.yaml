@@ -45,6 +45,8 @@ patches:
     file: openssl_ssl_default_store_crl_removal.patch
   - feature: rubygems_openssl_require
     file: rubygems_openssl_require.patch
+  - feature: rubygems_ssl_certs_vfs_read
+    file: rubygems_ssl_certs_vfs_read.patch
   - feature: thread_pthread_main_stack_musl
     file: thread_pthread_main_stack_musl.patch
   - feature: win32_clock_rename_msys

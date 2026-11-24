@@ -2,8 +2,8 @@
 # ci/spec22-gems/run-msys.sh — spec 22 gem-level acceptance, WINDOWS leg.
 # The msys port of run.sh (spec 22 §8's last acceptance row: the v2
 # dogfood suite green with the gem gone on EVERY published platform).
-# Runs the same four jailed proof legs against the same fixtures and
-# pins the same PROBE lines (README.md) — plus a fifth forensic leg
+# Runs the same five jailed proof legs against the same fixtures and
+# pins the same PROBE lines (README.md) — plus a sixth forensic leg
 # (sassc-matrix: the incident-13 diag sheet on a pristine loader, never
 # gates) — with the gem-loaded canary pinned `no`.
 #
@@ -602,7 +602,7 @@ run_probe() {
 }
 
 step "jailed probe runs (TEBAKO_JAIL=deny;<scratch>:/host-scratch:rw)"
-st_fixed=0; st_unfixed=0; st_sassc=0; st_sassc_nomat=0; st_matrix=0
+st_fixed=0; st_unfixed=0; st_sassc=0; st_sassc_nomat=0; st_matrix=0; st_sslcerts=0
 run_probe sinatra-fixed   || st_fixed=$?
 run_probe sinatra-unfixed || st_unfixed=$?
 run_probe sassc           || st_sassc=$?
@@ -611,6 +611,7 @@ run_probe sassc-unmaterialized "$PAYLOAD_IMG_NOMAT" || st_sassc_nomat=$?
 # first — the bisect legs run post-LoadError by construction). Its
 # PROBE-DIAG lines carry the verdicts; the leg itself must only complete.
 run_probe sassc-matrix    || st_matrix=$?
+run_probe ssl-certs       || st_sslcerts=$?
 
 gem_loaded="$(grep -m1 -oE '^PROBE gem-loaded (yes|no)' "$SCRATCH/proof-sinatra-fixed.log" | awk '{print $3}')"
 [ -n "$gem_loaded" ] || die "gem-loaded instrumentation line missing"
@@ -618,7 +619,7 @@ gem_loaded="$(grep -m1 -oE '^PROBE gem-loaded (yes|no)' "$SCRATCH/proof-sinatra-
 # means the gem crept back into the env image (or a boot-time require
 # returned) — same pin as POSIX.
 [ "$gem_loaded" = "no" ] || die "gem-loaded must be no post-M2, got $gem_loaded"
-for leg in sinatra-unfixed sassc sassc-unmaterialized sassc-matrix; do
+for leg in sinatra-unfixed sassc sassc-unmaterialized sassc-matrix ssl-certs; do
   other="$(grep -m1 -oE '^PROBE gem-loaded (yes|no)' "$SCRATCH/proof-$leg.log" | awk '{print $3}')"
   [ "$other" = "$gem_loaded" ] || die "gem-loaded disagree across legs ($gem_loaded vs $other in $leg)"
 done
@@ -637,5 +638,14 @@ grep -qF "PROBE sassc-partial-unmaterialized expected-fail $SASSC_PARTIAL_PIN" "
 [ "$st_matrix" -eq 0 ] || die "sassc-matrix leg exit $st_matrix"
 grep -q "^PROBE sassc-matrix done" "$SCRATCH/proof-sassc-matrix.log" \
   || die "sassc-matrix leg (no done line — the sheet aborted)"
+# ruby#387: the bundled CA pems load into rubygems' HTTPS trust store
+# through ruby's VFS-routed IO — jailed, offline. The native twin
+# (X509::Store#add_file on the same in-image path) must keep failing
+# closed: its unexpected-ok would mean the green came from a host-real
+# pem (a leftover subst bridge), not from the VFS read.
+[ "$st_sslcerts" -eq 0 ] || die "ssl-certs leg exit $st_sslcerts"
+grep -q "^PROBE ssl-certs ok " "$SCRATCH/proof-ssl-certs.log" || die "ssl-certs leg"
+grep -q "^PROBE ssl-certs-native expected-fail OpenSSL::X509::StoreError: X509_LOOKUP_load_file" "$SCRATCH/proof-ssl-certs.log" \
+  || die "ssl-certs native oracle (expected the pinned ruby#387 native failure signature)"
 
 echo "SPEC22-GEMS-MSYS-ACCEPTANCE-OK $VERSION ($RUNTIME_EXE; sinatra $SINATRA_VERSION, sassc $SASSC_VERSION, no tebako-runtime gem)"

@@ -1,0 +1,42 @@
+# rubygems_ssl_certs_vfs_read.patch
+#
+# Target:  lib/rubygems/request.rb (pass1 (all platforms))
+# Source:  tebako-specific (ruby#387); no upstream twin — rubygems master
+#          still loads the bundled certs with X509::Store#add_file.
+#
+# rubygems' HTTPS fetch builds its trust store from the bundled
+# ssl_certs/*/*.pem with OpenSSL::X509::Store#add_file, which makes
+# libcrypto fopen() the path through the host CRT. In a packaged runtime
+# the bundled certs live INSIDE the mounted env image: the VFS path is
+# not host-real, so the read (a) bypasses the jail router — invisible to
+# policy — and (b) fails closed with StoreError (X509_LOOKUP_load_file:
+# BIO lib) the moment rubygems fetches over HTTPS (gem install without
+# --local, ruby#387). Read the bytes through ruby's VFS-routed IO and
+# hand openssl the parsed certs, matching the File.read coverage
+# ssl_client_cert already has two blocks up. ssl_ca_cert stays native:
+# it names a USER-supplied host path, which the host is entitled to
+# read.
+diff --git a/lib/rubygems/request.rb b/lib/rubygems/request.rb
+index c3ea46e..3f6a65c 100644
+--- a/lib/rubygems/request.rb
++++ b/lib/rubygems/request.rb
+@@ -59,7 +59,18 @@ class Gem::Request
+ 
+     store.set_default_paths
+     cert_files.each do |ssl_cert_file|
+-      store.add_file ssl_cert_file
++      # Start of tebako patch
++      # X509::Store#add_file makes libcrypto fopen() the path on the raw
++      # host filesystem: an in-image (VFS) cert is not host-real, and the
++      # read bypasses the jail router entirely. Read the bytes through
++      # ruby's VFS-routed IO and hand openssl the parsed certs (the
++      # bundled pems ship one certificate each; the scan keeps a
++      # bundle-shaped file whole).
++      pem_blocks = File.read(ssl_cert_file).scan(/-----BEGIN CERTIFICATE-----.*?-----END CERTIFICATE-----/m)
++      pem_blocks.each do |pem|
++        store.add_cert(OpenSSL::X509::Certificate.new(pem))
++      end
++      # End of tebako patch
+     end
+     if Gem.configuration.ssl_ca_cert
+       if File.directory? Gem.configuration.ssl_ca_cert
