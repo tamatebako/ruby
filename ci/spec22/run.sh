@@ -80,7 +80,7 @@ if [ ! -f "$SCRATCH/mirror/tfs-ruby-$VERSION-src.tar.gz" ]; then
   [ -f "$SCRATCH/roll/tfs-ruby-$VERSION-src/dln.c" ] || die "apply produced no tree"
   grep -q "tfs_dlopen_route" "$SCRATCH/roll/tfs-ruby-$VERSION-src/dln.c" \
     || die "rolled tree lacks the loader-interpose block (manifest not wired?)"
-  ( cd "$SCRATCH/roll" && tar "${DET_TAR[@]}" -czf "$SCRATCH/mirror/tfs-ruby-$VERSION-src.tar.gz" "tfs-ruby-$VERSION-src" )
+  ( cd "$SCRATCH/roll" && tar ${DET_TAR[@]+"${DET_TAR[@]}"} -czf "$SCRATCH/mirror/tfs-ruby-$VERSION-src.tar.gz" "tfs-ruby-$VERSION-src" )
   ( cd "$SCRATCH/mirror" && shasum -a 256 "tfs-ruby-$VERSION-src.tar.gz" > SHA256SUMS )
 fi
 

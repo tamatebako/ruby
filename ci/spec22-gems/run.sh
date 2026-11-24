@@ -26,7 +26,7 @@
 #      with the release tfs CLI: the materialized image declares
 #      materialize: for the styles tree, the negative-oracle image is the
 #      same tree WITHOUT the key,
-#   6. four jailed invocations of the runtime (one per proof leg group);
+#   6. five jailed invocations of the runtime (one per proof leg group);
 #      grep-verdict on the PROBE lines, the gem-loaded canary pinned `no`.
 #
 # The leg matrix and the pinned expected-fail signatures are documented
@@ -117,7 +117,7 @@ if [ ! -f "$SCRATCH/mirror/tfs-ruby-$VERSION-src.tar.gz" ]; then
   [ -f "$SCRATCH/roll/tfs-ruby-$VERSION-src/dln.c" ] || die "apply produced no tree"
   grep -q "tfs_dlopen_route" "$SCRATCH/roll/tfs-ruby-$VERSION-src/dln.c" \
     || die "rolled tree lacks the loader-interpose block (manifest not wired?)"
-  ( cd "$SCRATCH/roll" && tar "${DET_TAR[@]}" -czf "$SCRATCH/mirror/tfs-ruby-$VERSION-src.tar.gz" "tfs-ruby-$VERSION-src" )
+  ( cd "$SCRATCH/roll" && tar ${DET_TAR[@]+"${DET_TAR[@]}"} -czf "$SCRATCH/mirror/tfs-ruby-$VERSION-src.tar.gz" "tfs-ruby-$VERSION-src" )
   ( cd "$SCRATCH/mirror" && shasum -a 256 "tfs-ruby-$VERSION-src.tar.gz" > SHA256SUMS )
 fi
 
@@ -192,13 +192,13 @@ if [ ! -f "$SETUP_IMG" ] || [ "$SELF_DIR/fixtures/gem.rb" -nt "$SETUP_IMG" ]; th
   "$TFS_CLI" mkimage --format "$MKIMAGE_FORMAT" "$SCRATCH/setup-tree" --output "$SETUP_IMG" >/dev/null
 fi
 
-# The mount-root bridge (setup leg only). Two build-time consumers reach
-# for raw HOST paths under the runtime root, exactly like spec 22 class R:
-#   - rubygems' HTTPS fetcher: OpenSSL::X509::Store#add_file on the
-#     in-image ssl_certs/*.pem (ruby's File.exist? sees the VFS file, the
-#     C-level fopen does not),
-#   - mkmf: the era-2 rbconfig derives rubyhdrdir from the prefix; the
-#     image ships no include/, and host clang cannot read VFS paths.
+# The mount-root bridge (setup leg only). mkmf reaches for raw HOST paths
+# under the runtime root, exactly like spec 22 class R: the era-2 rbconfig
+# derives rubyhdrdir from the prefix; the image ships no include/, and
+# host clang cannot read VFS paths. (rubygems' HTTPS fetcher used to be the
+# second such consumer — X509::Store#add_file on the in-image
+# ssl_certs/*.pem — until ruby#387 routed that read through ruby's
+# VFS-aware File IO; the ssl-certs proof leg keeps it there.)
 # The env image's layout.yaml grants mount_root_override, so the setup leg
 # runs with TEBAKO_MOUNT_ROOT pointed at a host-real tree carrying the
 # byte-same content (the factory's pressed layout tree) PLUS the stash
@@ -317,11 +317,12 @@ run_probe() {
 }
 
 step "jailed probe runs (TEBAKO_JAIL=deny;\$SCRATCH:\$SCRATCH:rw)"
-st_fixed=0; st_unfixed=0; st_sassc=0; st_sassc_nomat=0
+st_fixed=0; st_unfixed=0; st_sassc=0; st_sassc_nomat=0; st_sslcerts=0
 run_probe sinatra-fixed   || st_fixed=$?
 run_probe sinatra-unfixed || st_unfixed=$?
 run_probe sassc           || st_sassc=$?
 run_probe sassc-unmaterialized "$PAYLOAD_IMG_NOMAT" || st_sassc_nomat=$?
+run_probe ssl-certs       || st_sslcerts=$?
 
 gem_loaded="$(grep -m1 -oE '^PROBE gem-loaded (yes|no)' "$SCRATCH/proof-sinatra-fixed.log" | awk '{print $3}')"
 [ -n "$gem_loaded" ] || die "gem-loaded instrumentation line missing"
@@ -329,7 +330,7 @@ gem_loaded="$(grep -m1 -oE '^PROBE gem-loaded (yes|no)' "$SCRATCH/proof-sinatra-
 # means the gem crept back into the env image (or the prelude survived)
 [ "$gem_loaded" = "no" ] || die "gem-loaded must be no post-M2, got $gem_loaded"
 # every invocation must report the same boot state
-for leg in sinatra-unfixed sassc sassc-unmaterialized; do
+for leg in sinatra-unfixed sassc sassc-unmaterialized ssl-certs; do
   other="$(grep -m1 -oE '^PROBE gem-loaded (yes|no)' "$SCRATCH/proof-$leg.log" | awk '{print $3}')"
   [ "$other" = "$gem_loaded" ] || die "gem-loaded disagree across legs ($gem_loaded vs $other in $leg)"
 done
@@ -356,5 +357,15 @@ grep -q "^PROBE sinatra-unfixed ok status=200 " "$SCRATCH/proof-sinatra-unfixed.
 [ "$st_sassc_nomat" -eq 0 ] || die "sassc-unmaterialized leg exit $st_sassc_nomat"
 grep -qF "PROBE sassc-partial-unmaterialized expected-fail $SASSC_PARTIAL_PIN" "$SCRATCH/proof-sassc-unmaterialized.log" \
   || die "sassc-partial-unmaterialized leg (expected the pinned class-R failure signature)"
+
+# ruby#387: the bundled CA pems load into rubygems' HTTPS trust store
+# through ruby's VFS-routed IO — jailed, offline. The native twin
+# (X509::Store#add_file on the same in-image path) must keep failing
+# closed: its unexpected-ok would mean the green came from a host-real
+# pem, not from the VFS read.
+[ "$st_sslcerts" -eq 0 ] || die "ssl-certs leg exit $st_sslcerts"
+grep -q "^PROBE ssl-certs ok " "$SCRATCH/proof-ssl-certs.log" || die "ssl-certs leg"
+grep -q "^PROBE ssl-certs-native expected-fail OpenSSL::X509::StoreError: X509_LOOKUP_load_file" "$SCRATCH/proof-ssl-certs.log" \
+  || die "ssl-certs native oracle (expected the pinned ruby#387 native failure signature)"
 
 echo "SPEC22-GEMS-ACCEPTANCE-OK $VERSION ($RUNTIME_EXE; sinatra $SINATRA_VERSION, sassc $SASSC_VERSION, no tebako-runtime gem)"
