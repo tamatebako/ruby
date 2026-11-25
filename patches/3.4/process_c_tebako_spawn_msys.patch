@@ -19,10 +19,10 @@
 #
 # The design notes live in the neutral patch's header.
 diff --git a/process.c b/process.c
-index 71d7ccb..b2fc814 100644
+index 71d7ccb..3556194 100644
 --- a/process.c
 +++ b/process.c
-@@ -2762,6 +2762,973 @@ rb_execarg_get(VALUE execarg_obj)
+@@ -2762,6 +2762,1089 @@ rb_execarg_get(VALUE execarg_obj)
      return eargp;
  }
  
@@ -116,6 +116,27 @@ index 71d7ccb..b2fc814 100644
 +                                     char **out_argv, size_t *out_argv_len,
 +                                     char **out_env, size_t *out_env_len,
 +                                     char **out_error)
++#if defined(__APPLE__)
++    __attribute__((weak_import));
++#elif defined(_WIN32)
++    ;
++#else
++    __attribute__((weak));
++#endif
++
++/* The exec-target insertion probe (spec 22 §3.2's stripped-shape
++   verdict; the tfs C ABI, tebako#1127): 1 when a spawn of this host
++   file honors the platform's injection variable, 0 for the one
++   stripped shape — darwin: a hardened-runtime target signed WITHOUT
++   com.apple.security.cs.allow-dyld-environment-variables drops
++   DYLD_INSERT_LIBRARIES at exec. Never fails closed (unreadable,
++   non-Mach-O, unparseable, NULL all answer 1 — attempt the injection);
++   darwin 24+ and ELF answer 1 always. WEAK where the platform allows:
++   a runtime linked against a pre-probe link unit carries no such
++   symbol — the reference reads NULL and every spawn keeps the
++   injection path byte-identical. Windows links STRONG and never
++   references it (no injection exists on the platform). */
++extern int tebako_fs_exec_dyld_insertion_honored(const char *path)
 +#if defined(__APPLE__)
 +    __attribute__((weak_import));
 +#elif defined(_WIN32)
@@ -482,6 +503,64 @@ index 71d7ccb..b2fc814 100644
 +    RB_GC_GUARD(out);
 +}
 +
++
++#if defined(__APPLE__)
++/* The array form of the windows host tier's token bridge, fired per
++   spawn whose materialized target DROPS the insertion (spec 22 §3.2's
++   injection-stripped bridge): every NUL-separated argv_buf token —
++   argv[0] included — probes through tfs_bridge_arg, a bridged token
++   rewrites to the materialized host twin, and the argv_str pointer
++   vector is rebuilt into the new buffer exactly as rb_exec_fillarg
++   built it. No re-quoting (the array form carries no shell);
++   byte-identical when nothing bridges; a covered path the mounts do
++   not hold keeps its spelling. */
++static void
++tfs_bridge_argv(struct rb_execarg *eargp)
++{
++    VALUE buf = eargp->invoke.cmd.argv_buf;
++    const char *p;
++    const char *ep;
++    VALUE nbuf;
++    int dirty = 0;
++    if (!RB_TYPE_P(buf, T_STRING)) return;
++    p = RSTRING_PTR(buf);
++    ep = p + RSTRING_LEN(buf);
++    nbuf = hide_obj(rb_str_buf_new(RSTRING_LEN(buf) + 32));
++    while (p < ep) {
++        size_t tlen = strlen(p);
++        char *twin = tfs_bridge_arg(p, tlen);
++        if (twin != NULL) {
++            rb_str_buf_cat(nbuf, twin, strlen(twin) + 1);
++            free(twin);
++            dirty = 1;
++        }
++        else {
++            rb_str_buf_cat(nbuf, p, tlen + 1);
++        }
++        p += tlen + 1;
++    }
++    if (!dirty) {
++        RB_GC_GUARD(nbuf);
++        return;
++    }
++    eargp->invoke.cmd.argv_buf = nbuf;
++    {
++        const char *q = RSTRING_PTR(nbuf);
++        const char *eq = q + RSTRING_LEN(nbuf);
++        const char *null = NULL;
++        VALUE av = hide_obj(rb_str_buf_new(0));
++        rb_str_buf_cat(av, (char *)&null, sizeof(null)); /* try_with_sh placeholder */
++        while (q < eq) {
++            rb_str_buf_cat(av, (char *)&q, sizeof(q));
++            q += strlen(q) + 1;
++        }
++        rb_str_buf_cat(av, (char *)&null, sizeof(null));
++        eargp->invoke.cmd.argv_str =
++            rb_imemo_tmpbuf_auto_free_pointer_new_from_an_RString(av);
++    }
++}
++#endif
++
 +/* Spawn of a memfs-resident binary: materialize the exec target to the
 +   host cache, point command_abspath at it (the child execve()s
 +   command_abspath; command_name follows for error reporting), and put
@@ -614,6 +693,43 @@ index 71d7ccb..b2fc814 100644
 +    if (tfs_spawn_target_restricted(eargp)) {
 +        tfs_env_unset(eargp, "DYLD_INSERT_LIBRARIES");
 +        return;
++    }
++
++    /* The injection-stripped bridge (packed-metanorma#305, spec 22
++       §3.2): a hardened-runtime child signed WITHOUT
++       com.apple.security.cs.allow-dyld-environment-variables drops
++       DYLD_INSERT_LIBRARIES at exec — the preload shim never enters it
++       and every embedded operand answers the host's ENOENT
++       (dartaotruntime's snapshot: "not an AOT snapshot" — the EOFError
++       chain). Probe the materialized target per spawn: a stripped
++       verdict fires the array bridge above (each embedded operand
++       rides to its materialized host twin, Rule E4's sibling sweep
++       included) and OMITS the injection pair — the child runs as an
++       unsigned pre-shim binary against bridged arguments, the scrub
++       named on the debug channel, never silent. A #! script is not
++       Mach-O, so the verdict belongs to the interpreter execve
++       actually loads (the restricted-check's own resolution order).
++       An honored verdict — or a pre-probe link unit, where the weak
++       extern reads NULL — keeps the injection path byte-identical. */
++    if (tebako_fs_exec_dyld_insertion_honored != NULL &&
++        RB_TYPE_P(eargp->invoke.cmd.command_abspath, T_STRING)) {
++        const char *target = RSTRING_PTR(eargp->invoke.cmd.command_abspath);
++        char interp[MAXPATHLEN];
++        if (tfs_shebang_interpreter(target, interp, sizeof(interp)))
++            target = interp;
++        if (tebako_fs_exec_dyld_insertion_honored(target) == 0) {
++            if (getenv("TEBAKO_DEBUG_TFS") != NULL) {
++                fprintf(stderr,
++                        "[spawn] %s: hardened runtime without "
++                        "allow-dyld-environment-variables drops "
++                        "DYLD_INSERT_LIBRARIES — scrubbed for this child, "
++                        "embedded operands bridged to host twins\n",
++                        target);
++            }
++            tfs_env_unset(eargp, "DYLD_INSERT_LIBRARIES");
++            tfs_bridge_argv(eargp);
++            return;
++        }
 +    }
 +#endif
 +
@@ -996,7 +1112,7 @@ index 71d7ccb..b2fc814 100644
  static VALUE
  rb_execarg_init(int argc, const VALUE *orig_argv, int accept_shell, VALUE execarg_obj)
  {
-@@ -2774,6 +3732,9 @@ rb_execarg_init(int argc, const VALUE *orig_argv, int accept_shell, VALUE execar
+@@ -2774,6 +3857,9 @@ rb_execarg_init(int argc, const VALUE *orig_argv, int accept_shell, VALUE execar
      prog = rb_exec_getargs(&argc, &argv, accept_shell, &env, &opthash);
      rb_exec_fillarg(prog, argc, argv, env, opthash, execarg_obj);
      ALLOCV_END(argv_buf);
