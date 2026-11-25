@@ -96,6 +96,16 @@ int tebako_get_errno(void);
 char* tebako_fs_dlmap2file(const char* path);
 char* tebako_fs_exec_materialize(const char* path);
 char* tebako_fs_exec_materialize_dir(const char* path);
+/* The exec-target insertion probe (spec 22 §3.2's stripped-shape
+ * verdict; tebako#1127): 1 when a spawn of this host file honors the
+ * platform's injection variable, 0 for the one stripped shape — darwin:
+ * a hardened-runtime target signed WITHOUT
+ * com.apple.security.cs.allow-dyld-environment-variables drops
+ * DYLD_INSERT_LIBRARIES at exec. Never fails closed; darwin 24+ and ELF
+ * answer 1 always. The spawn patch re-declares it WEAK (a pre-probe
+ * link unit reads NULL and keeps the injection path byte-identical) —
+ * the same pattern as tebako_fs_exec_materialize_dir above. */
+int tebako_fs_exec_dyld_insertion_honored(const char* path);
 char* tebako_fs_mounts(void);
 char* tebako_fs_mount_of(const char* path);
 
